@@ -1,0 +1,41 @@
+# 复制为 config.yaml 后，填写本机或部署环境的实际值。
+# 不要将 config.yaml、生产数据库密码或 JWT 密钥提交到 Git。
+server:
+  port: 8080
+  mode: debug
+
+database:
+  host: localhost
+  port: 3306
+  username: root
+  password: CHANGE_ME
+  database: chatroom
+  charset: utf8mb4
+  max_idle_conns: 10
+  max_open_conns: 100
+
+redis:
+  host: localhost
+  port: 6379
+  password: ""
+  db: 0
+
+jwt:
+  # 使用安全随机值，例如 openssl rand -hex 32。
+  secret: CHANGE_ME_GENERATE_A_RANDOM_64_CHAR_HEX_SECRET
+  expire: 24h
+
+log:
+  level: debug
+  format: console
+  output: stdout
+
+file:
+  max_size: 52428800
+  allowed_types:
+    - image/jpeg
+    - image/png
+    - image/gif
+    - application/pdf
+    - application/msword
+  storage_path: ./storage

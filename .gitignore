@@ -1,0 +1,46 @@
+# Go
+backend/*.exe
+backend/*.exe~
+backend/*.dll
+backend/*.so
+backend/*.dylib
+backend/*.test
+backend/*.out
+backend/vendor/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config
+.env
+*.local
+backend/configs/config.yaml
+backend/configs/*.local.yaml
+!backend/configs/config.example.yaml
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Storage
+backend/storage/files/*
+backend/storage/images/*
+!backend/storage/files/.gitkeep
+!backend/storage/images/.gitkeep
+
+# Logs
+*.log
+
+# Internal notes
+docs/代码审查报告.md
