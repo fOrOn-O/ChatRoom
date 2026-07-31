@@ -56,7 +56,11 @@ func HandleWebSocket(c *gin.Context, hub *ws.Hub, db *gorm.DB) {
 	client := ws.NewClient(conn, userID, username, groupIDs)
 
 	// 注册客户端到 Hub
-	hub.Register(client)
+	if err := hub.Register(client); err != nil {
+		log.Printf("WebSocket 注册失败: %v", err)
+		client.CloseWithReason(websocket.CloseTryAgainLater, "server unavailable")
+		return
+	}
 
 	// 启动读写 Goroutine
 	go client.WritePump()

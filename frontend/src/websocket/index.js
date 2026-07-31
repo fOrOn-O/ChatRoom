@@ -1,12 +1,15 @@
-import { ref } from 'vue'
+import { ref, shallowRef } from 'vue'
 
-const socket = ref(null)
+export const CLOSE_CODE_CONNECTION_REPLACED = 4001
+
+const socket = shallowRef(null)
 const connected = ref(false)
 const callbacks = {
   message: new Set(),
   onlineStatus: new Set(),
   typing: new Set(),
-  ack: new Set()
+  ack: new Set(),
+  sessionReplaced: new Set()
 }
 
 let reconnectTimer = null
@@ -65,10 +68,20 @@ export function connect(token) {
     }
   }
 
-  ws.onclose = () => {
+  ws.onclose = (event) => {
     if (socket.value === ws) {
       socket.value = null
       connected.value = false
+
+      if (event.code === CLOSE_CODE_CONNECTION_REPLACED) {
+        shouldReconnect = false
+        reconnectAttempts = 0
+        if (reconnectTimer) window.clearTimeout(reconnectTimer)
+        reconnectTimer = null
+        notify('sessionReplaced', { code: event.code, reason: event.reason })
+        return
+      }
+
       scheduleReconnect()
     }
   }

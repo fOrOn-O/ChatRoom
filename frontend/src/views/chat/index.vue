@@ -664,7 +664,6 @@ watch(() => chatStore.currentChat?.id, () => { inviteIds.value = [] })
 onMounted(async () => {
   try {
     await userStore.fetchProfile()
-    connect(userStore.token)
     unsubscribeCallbacks = [
       subscribe('message', (message) => {
         const key = chatStore.addMessage(message)
@@ -689,8 +688,12 @@ onMounted(async () => {
           window.clearTimeout(typingTimer)
           typingTimer = window.setTimeout(() => { typingUser.value = '' }, 2800)
         }
+      }),
+      subscribe('sessionReplaced', () => {
+        ElMessage.warning('当前连接已被新会话替换，已停止自动重连')
       })
     ]
+    connect(userStore.token)
     await Promise.all([chatStore.fetchFriends(), chatStore.fetchGroups()])
   } catch {
     // API 拦截器已经向用户展示了可读的错误信息。

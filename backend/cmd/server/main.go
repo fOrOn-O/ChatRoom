@@ -58,24 +58,30 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// 8. 优雅关闭
-	_, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	// 监听系统信号
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+	shutdownComplete := make(chan struct{})
 
 	go func() {
+		defer close(shutdownComplete)
 		<-sigCh
 		log.Println("收到关闭信号，正在优雅关闭...")
-		cancel()
 
 		// 给予 10 秒时间处理未完成的请求
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer shutdownCancel()
 
-		if err := server.Shutdown(shutdownCtx); err != nil {
+		serverShutdown := make(chan error, 1)
+		go func() {
+			serverShutdown <- server.Shutdown(shutdownCtx)
+		}()
+
+		if err := hub.Shutdown(shutdownCtx); err != nil {
+			log.Printf("WebSocket Hub 关闭错误: %v", err)
+		}
+		if err := <-serverShutdown; err != nil {
 			log.Printf("服务器关闭错误: %v", err)
 		}
 	}()
@@ -83,8 +89,14 @@ func main() {
 	// 9. 启动服务器
 	log.Printf("服务器启动在 %s", server.Addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if shutdownErr := hub.Shutdown(shutdownCtx); shutdownErr != nil {
+			log.Printf("WebSocket Hub 关闭错误: %v", shutdownErr)
+		}
+		shutdownCancel()
 		log.Fatalf("服务器启动失败: %v", err)
 	}
+	<-shutdownComplete
 
 	log.Println("服务器已关闭")
 }

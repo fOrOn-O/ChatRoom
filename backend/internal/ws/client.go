@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -11,21 +12,25 @@ import (
 
 const (
 	// 心跳相关
-	pongWait     = 60 * time.Second    // 等待 Pong 消息的超时时间
-	pingPeriod   = (pongWait * 9) / 10 // 发送 Ping 的周期
-	writeWait    = 10 * time.Second    // 写操作的超时时间
+	pongWait   = 60 * time.Second    // 等待 Pong 消息的超时时间
+	pingPeriod = (pongWait * 9) / 10 // 发送 Ping 的周期
+	writeWait  = 10 * time.Second    // 写操作的超时时间
 
 	// 消息限制
 	maxMessageSize = 4096 // 最大消息大小
 	sendBufferSize = 256  // 发送缓冲区大小
+
+	// CloseCodeConnectionReplaced indicates that a newer connection for the
+	// same account has taken ownership of the session.
+	CloseCodeConnectionReplaced = 4001
 )
 
 // Client 代表一个 WebSocket 客户端连接
 type Client struct {
 	// 用户信息
-	UserID   uint     // 用户ID
-	Username string   // 用户名
-	GroupIDs []uint   // 加入的群组ID列表
+	UserID   uint   // 用户ID
+	Username string // 用户名
+	GroupIDs []uint // 加入的群组ID列表
 
 	// WebSocket 连接
 	Conn *websocket.Conn
@@ -34,8 +39,9 @@ type Client struct {
 	Send chan *Message
 
 	// 生命周期控制
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx       context.Context
+	cancel    context.CancelFunc
+	closeOnce sync.Once
 
 	// 元数据
 	ConnectedAt time.Time
@@ -63,9 +69,8 @@ func NewClient(conn *websocket.Conn, userID uint, username string, groupIDs []ui
 // 运行在独立的 Goroutine 中
 func (c *Client) ReadPump(hub *Hub) {
 	defer func() {
-		hub.unregister <- c
-		c.Conn.Close()
-		c.cancel()
+		c.Close()
+		hub.Unregister(c)
 	}()
 
 	// 设置读取限制
@@ -177,7 +182,7 @@ func (c *Client) handleChatMessage(hub *Hub, data json.RawMessage) {
 		MsgID       string `json:"msg_id"`
 		ToID        uint   `json:"to_id"`
 		ToType      string `json:"to_type"`      // "user" 或 "group"
-		ContentType string `json:"content_type"`  // "text", "image", "file"
+		ContentType string `json:"content_type"` // "text", "image", "file"
 		Content     string `json:"content"`
 	}
 
@@ -260,17 +265,47 @@ func (c *Client) handleTyping(hub *Hub, data json.RawMessage) {
 
 // SendMessage 发送消息给客户端
 func (c *Client) SendMessage(msg *Message) bool {
+	return c.TrySend(msg)
+}
+
+// TrySend queues a message only while the client is active and the outbound
+// buffer has capacity.
+func (c *Client) TrySend(msg *Message) bool {
 	select {
+	case <-c.ctx.Done():
+		return false
+	default:
+	}
+
+	select {
+	case <-c.ctx.Done():
+		return false
 	case c.Send <- msg:
 		return true
 	default:
-		// 缓冲区满
 		return false
 	}
 }
 
 // Close 关闭客户端连接
 func (c *Client) Close() {
-	c.cancel()
-	c.Conn.Close()
+	c.CloseWithReason(websocket.CloseNormalClosure, "")
+}
+
+// CloseWithReason closes the client exactly once and, when possible, tells the
+// peer why the connection is being closed.
+func (c *Client) CloseWithReason(code int, reason string) {
+	c.closeOnce.Do(func() {
+		if c.Conn != nil {
+			_ = c.Conn.WriteControl(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(code, reason),
+				time.Now().Add(writeWait),
+			)
+		}
+		c.cancel()
+		if c.Conn != nil {
+			_ = c.Conn.Close()
+		}
+	})
 }

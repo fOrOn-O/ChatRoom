@@ -2,12 +2,21 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"log"
 	"sync"
 
-	"gorm.io/gorm"
+	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
 )
+
+var ErrHubClosed = errors.New("websocket hub is closed")
+
+type registerRequest struct {
+	client *Client
+	done   chan struct{}
+}
 
 // Hub 是 WebSocket 连接管理中心
 // 使用 Channel 实现高效的消息路由，避免 map 遍历
@@ -17,17 +26,17 @@ type Hub struct {
 	rdb *redis.Client
 
 	// ========== 注册/注销 Channel ==========
-	register   chan *Client    // 客户端注册
-	unregister chan *Client    // 客户端注销
+	register   chan registerRequest // 客户端注册
+	unregister chan *Client         // 客户端注销
 
 	// ========== 消息路由 Channel ==========
-	broadcast  chan *Message   // 广播消息
-	private    chan *Message   // 私聊消息
-	group      chan *Message   // 群聊消息
+	broadcast chan *Message // 广播消息
+	private   chan *Message // 私聊消息
+	group     chan *Message // 群聊消息
 
 	// ========== 状态管理 ==========
-	clients    map[uint]*Client           // 用户ID -> 客户端
-	groups     map[uint]map[uint]*Client  // 群ID -> {用户ID -> 客户端}
+	clients map[uint]*Client          // 用户ID -> 客户端
+	groups  map[uint]map[uint]*Client // 群ID -> {用户ID -> 客户端}
 
 	// ========== 并发控制 ==========
 	mu sync.RWMutex
@@ -45,7 +54,7 @@ func NewHub(db *gorm.DB, rdb *redis.Client) *Hub {
 	return &Hub{
 		db:         db,
 		rdb:        rdb,
-		register:   make(chan *Client, 256),
+		register:   make(chan registerRequest, 256),
 		unregister: make(chan *Client, 256),
 		broadcast:  make(chan *Message, 1024),
 		private:    make(chan *Message, 1024),
@@ -66,8 +75,9 @@ func (h *Hub) Run() {
 	for {
 		select {
 		// ========== 客户端注册 ==========
-		case client := <-h.register:
-			h.handleRegister(client)
+		case request := <-h.register:
+			h.handleRegister(request.client)
+			close(request.done)
 
 		// ========== 客户端注销 ==========
 		case client := <-h.unregister:
@@ -96,16 +106,15 @@ func (h *Hub) Run() {
 // handleRegister 处理客户端注册
 func (h *Hub) handleRegister(client *Client) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
-	// 修复 #2: 重复登录时关闭旧连接
-	if old, ok := h.clients[client.UserID]; ok {
-		log.Printf("用户 %d 重复登录，关闭旧连接", client.UserID)
-		// 不在这里关闭 old.Send，因为 defer 会处理
-		// 只是从群组映射中移除
+	old, wasOnline := h.clients[client.UserID]
+	if old != nil && old != client {
 		for _, groupID := range old.GroupIDs {
-			if members, ok := h.groups[groupID]; ok {
-				delete(members, old.GroupIDs[0])
+			if members, ok := h.groups[groupID]; ok && members[old.UserID] == old {
+				delete(members, old.UserID)
+				if len(members) == 0 {
+					delete(h.groups, groupID)
+				}
 			}
 		}
 	}
@@ -120,39 +129,52 @@ func (h *Hub) handleRegister(client *Client) {
 		h.groups[groupID][client.UserID] = client
 	}
 
-	log.Printf("用户 %d 上线, 当前在线: %d", client.UserID, len(h.clients))
+	onlineCount := len(h.clients)
+	h.mu.Unlock()
 
-	// 广播上线通知 - 移到锁外避免阻塞
-	go h.broadcastOnlineStatus(client.UserID, true)
+	if old != nil && old != client {
+		log.Printf("用户 %d 建立新连接，关闭旧连接", client.UserID)
+		old.CloseWithReason(CloseCodeConnectionReplaced, "connection replaced")
+	}
+
+	if !wasOnline {
+		log.Printf("用户 %d 上线, 当前在线: %d", client.UserID, onlineCount)
+		go h.broadcastOnlineStatus(client.UserID, true)
+	}
 }
 
 // handleUnregister 处理客户端注销
 func (h *Hub) handleUnregister(client *Client) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.disconnectClient(client, websocket.CloseNormalClosure, "")
+}
 
-	// 只删除当前存储的客户端（防止旧连接删除新连接）
+func (h *Hub) disconnectClient(client *Client, code int, reason string) bool {
+	h.mu.Lock()
+	removed := false
 	if current, ok := h.clients[client.UserID]; ok && current == client {
 		delete(h.clients, client.UserID)
 
-		// 从群组移除
 		for _, groupID := range client.GroupIDs {
-			if members, ok := h.groups[groupID]; ok {
+			if members, ok := h.groups[groupID]; ok && members[client.UserID] == client {
 				delete(members, client.UserID)
 				if len(members) == 0 {
 					delete(h.groups, groupID)
 				}
 			}
 		}
+		removed = true
+	}
+	onlineCount := len(h.clients)
+	h.mu.Unlock()
 
-		// 关闭发送通道
-		close(client.Send)
+	client.CloseWithReason(code, reason)
 
-		log.Printf("用户 %d 下线, 当前在线: %d", client.UserID, len(h.clients))
-
-		// 广播下线通知 - 移到锁外
+	if removed {
+		log.Printf("用户 %d 下线, 当前在线: %d", client.UserID, onlineCount)
 		go h.broadcastOnlineStatus(client.UserID, false)
 	}
+
+	return removed
 }
 
 // handlePrivateMessage 处理私聊消息
@@ -165,20 +187,10 @@ func (h *Hub) handlePrivateMessage(msg *Message) {
 	h.mu.RUnlock()
 
 	if ok {
-		// 用户在线，直接推送
-		select {
-		case target.Send <- msg:
-			// 消息发送成功
-		default:
-			// 修复 #1: 非阻塞发送 unregister，避免死锁
-			select {
-			case h.unregister <- target:
-			default:
-				log.Printf("unregister channel full, cannot disconnect user %d", target.UserID)
-			}
+		if !target.TrySend(msg) {
+			h.disconnectClient(target, websocket.CloseTryAgainLater, "client too slow")
 		}
 
-		// 发送确认给发送者
 		h.sendAck(msg.FromID, msg.MsgID, "sent")
 	} else {
 		// 用户离线，存储离线消息
@@ -192,27 +204,19 @@ func (h *Hub) handleGroupMessage(msg *Message) {
 	h.saveMessage(msg)
 
 	h.mu.RLock()
-	members, ok := h.groups[msg.ToID]
-	h.mu.RUnlock()
-
-	if !ok {
-		return
-	}
-
-	// 向群内所有成员发送消息（除了发送者）
+	members := h.groups[msg.ToID]
+	recipients := make([]*Client, 0, len(members))
 	for userID, client := range members {
 		if userID == msg.FromID {
 			continue
 		}
-		select {
-		case client.Send <- msg:
-		default:
-			// 修复 #1: 非阻塞发送 unregister，避免死锁
-			select {
-			case h.unregister <- client:
-			default:
-				log.Printf("unregister channel full, cannot disconnect user %d", userID)
-			}
+		recipients = append(recipients, client)
+	}
+	h.mu.RUnlock()
+
+	for _, client := range recipients {
+		if !client.TrySend(msg) {
+			h.disconnectClient(client, websocket.CloseTryAgainLater, "client too slow")
 		}
 	}
 
@@ -223,18 +227,15 @@ func (h *Hub) handleGroupMessage(msg *Message) {
 // handleBroadcastMessage 处理广播消息
 func (h *Hub) handleBroadcastMessage(msg *Message) {
 	h.mu.RLock()
-	defer h.mu.RUnlock()
-
+	recipients := make([]*Client, 0, len(h.clients))
 	for _, client := range h.clients {
-		select {
-		case client.Send <- msg:
-		default:
-			// 修复 #1: 非阻塞发送 unregister，避免死锁
-			select {
-			case h.unregister <- client:
-			default:
-				log.Printf("unregister channel full, cannot disconnect user %d", client.UserID)
-			}
+		recipients = append(recipients, client)
+	}
+	h.mu.RUnlock()
+
+	for _, client := range recipients {
+		if !client.TrySend(msg) {
+			h.disconnectClient(client, websocket.CloseTryAgainLater, "client too slow")
 		}
 	}
 }
@@ -278,15 +279,17 @@ func (h *Hub) broadcastOnlineStatus(userID uint, online bool) {
 	}
 
 	h.mu.RLock()
-	defer h.mu.RUnlock()
-
+	recipients := make([]*Client, 0, len(h.clients))
 	for _, client := range h.clients {
 		if client.UserID != userID {
-			select {
-			case client.Send <- msg:
-			default:
-				// 静默丢弃，不阻塞
-			}
+			recipients = append(recipients, client)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, client := range recipients {
+		if !client.TrySend(msg) {
+			h.disconnectClient(client, websocket.CloseTryAgainLater, "client too slow")
 		}
 	}
 }
@@ -305,9 +308,8 @@ func (h *Hub) sendAck(userID uint, msgID string, status string) {
 				"status": status,
 			},
 		}
-		select {
-		case client.Send <- ack:
-		default:
+		if !client.TrySend(ack) {
+			h.disconnectClient(client, websocket.CloseTryAgainLater, "client too slow")
 		}
 	}
 }
@@ -334,26 +336,67 @@ func (h *Hub) storeOfflineMessage(msg *Message) {
 // cleanup 清理资源
 func (h *Hub) cleanup() {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	// 修复 #15: 关闭所有客户端连接
+	clients := make([]*Client, 0, len(h.clients))
 	for _, client := range h.clients {
-		client.Close()
+		clients = append(clients, client)
 	}
 
-	// 清空映射
 	h.clients = make(map[uint]*Client)
 	h.groups = make(map[uint]map[uint]*Client)
+	h.mu.Unlock()
+
+	for _, client := range clients {
+		client.CloseWithReason(websocket.CloseGoingAway, "server shutting down")
+	}
 
 	close(h.done)
 }
 
 // Register 注册客户端（供外部调用）
-func (h *Hub) Register(client *Client) {
+func (h *Hub) Register(client *Client) error {
 	select {
-	case h.register <- client:
+	case <-h.ctx.Done():
+		return ErrHubClosed
 	default:
-		log.Printf("register channel full, dropping client %d", client.UserID)
+	}
+
+	request := registerRequest{
+		client: client,
+		done:   make(chan struct{}),
+	}
+
+	select {
+	case h.register <- request:
+	case <-h.ctx.Done():
+		return ErrHubClosed
+	}
+
+	select {
+	case <-request.done:
+		return nil
+	case <-h.ctx.Done():
+		return ErrHubClosed
+	}
+}
+
+// Unregister submits a client cleanup request without blocking forever after
+// the Hub has begun shutting down.
+func (h *Hub) Unregister(client *Client) {
+	select {
+	case h.unregister <- client:
+	case <-h.ctx.Done():
+	}
+}
+
+// Shutdown stops the Hub, closes all active WebSocket connections and waits
+// for cleanup to finish or for ctx to expire.
+func (h *Hub) Shutdown(ctx context.Context) error {
+	h.cancel()
+	select {
+	case <-h.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
