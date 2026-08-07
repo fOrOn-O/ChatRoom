@@ -42,5 +42,8 @@ backend/storage/images/*
 # Logs
 *.log
 
+# Local test and preview artifacts
+/output/
+
 # Internal notes
 docs/代码审查报告.md
