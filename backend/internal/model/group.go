@@ -21,6 +21,12 @@ type Group struct {
 	DeletedAt    gorm.DeletedAt `json:"-" gorm:"index"`
 }
 
+// 群状态
+const (
+	GroupStatusDissolved = 0
+	GroupStatusActive    = 1
+)
+
 // TableName 表名
 func (Group) TableName() string {
 	return "groups"

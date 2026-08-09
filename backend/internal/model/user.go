@@ -6,6 +6,12 @@ import (
 	"gorm.io/gorm"
 )
 
+// 用户状态常量
+const (
+	UserStatusDisabled = 0
+	UserStatusActive   = 1
+)
+
 // User 用户模型
 type User struct {
 	ID        uint           `json:"id" gorm:"primaryKey"`
