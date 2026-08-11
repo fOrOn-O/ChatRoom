@@ -44,6 +44,8 @@ backend/storage/images/*
 
 # Local test and preview artifacts
 /output/
+/.runlogs/
+/ui-audit/
 
 # Internal notes
 docs/代码审查报告.md

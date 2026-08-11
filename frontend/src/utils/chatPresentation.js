@@ -34,7 +34,7 @@ export function messageAuthorKey(message, selfId) {
 }
 
 export function canGroupMessages(previous, current, selfId) {
-  if (!previous || !current || previous.status === 2 || current.status === 2) return false
+  if (!previous || !current) return false
   const previousDate = validDate(previous.timestamp)
   const currentDate = validDate(current.timestamp)
   if (!previousDate || !currentDate || !isSameDay(previousDate, currentDate)) return false

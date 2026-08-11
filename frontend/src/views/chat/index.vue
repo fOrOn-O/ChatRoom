@@ -142,20 +142,19 @@
             <transition-group v-else name="message" tag="div" class="message-stack">
               <div v-for="(message, index) in currentMessages" :key="message.msg_id" class="message-entry">
                 <div v-if="showDateDivider(index)" class="date-divider"><span>{{ dateDivider(message.timestamp) }}</span></div>
-                <article class="message-row" :class="{ self: isSelf(message), revoked: message.status === 2, 'group-start': isMessageGroupStart(index), 'group-end': isMessageGroupEnd(index), grouped: !isMessageGroupStart(index) }">
+                <article class="message-row" :class="{ self: isSelf(message), 'group-start': isMessageGroupStart(index), 'group-end': isMessageGroupEnd(index), grouped: !isMessageGroupStart(index) }">
                   <el-avatar v-if="!isSelf(message) && isMessageGroupStart(index)" :size="32" :src="messageAvatar(message)">{{ initial(messageSender(message)) }}</el-avatar>
                   <span v-else-if="!isSelf(message)" class="avatar-spacer" aria-hidden="true"></span>
                   <div class="message-body">
                     <div v-if="chatStore.currentChat.type === 'group' && !isSelf(message) && isMessageGroupStart(index)" class="sender-name">{{ messageSender(message) }}</div>
                     <div class="bubble">
-                      <template v-if="message.status === 2"><span class="recalled">此消息已撤回</span></template>
-                      <template v-else-if="message.content_type === 'image'">
+                      <template v-if="message.content_type === 'image'">
                         <button class="image-preview-button" aria-label="预览聊天图片" @click="previewImage(message.content)"><img :src="assetUrl(message.content)" alt="发送的图片" class="image-message" width="330" height="220" loading="lazy"></button>
                       </template>
                       <template v-else-if="message.content_type === 'file'"><a :href="assetUrl(message.content)" class="file-message" target="_blank" rel="noopener" :download="fileName(message)" @click.prevent="downloadAttachment(message)"><el-icon><Document /></el-icon><span><strong>{{ fileName(message) }}</strong><small>点击下载文件</small></span><el-icon><Download /></el-icon></a></template>
                       <template v-else>{{ message.content }}</template>
                     </div>
-                    <div v-if="isMessageGroupEnd(index)" class="message-meta"><time :datetime="isoTime(message.timestamp)">{{ fullTime(message.timestamp) }}</time><span v-if="isSelf(message) && message.local_status === 'sending'">发送中</span><span v-else-if="isSelf(message) && message.local_status === 'failed'" class="failed">未发送</span><span v-else-if="isSelf(message)">已发送</span><button v-if="canRevoke(message)" title="撤回消息" @click="revoke(message)"><el-icon><RefreshLeft /></el-icon>撤回</button></div>
+                    <div v-if="isMessageGroupEnd(index)" class="message-meta"><time :datetime="isoTime(message.timestamp)">{{ fullTime(message.timestamp) }}</time><span v-if="isSelf(message) && message.local_status === 'sending'">发送中</span><span v-else-if="isSelf(message) && message.local_status === 'failed'" class="failed">未发送</span><span v-else-if="isSelf(message)">已发送</span></div>
                   </div>
                   <el-avatar v-if="isSelf(message) && isMessageGroupStart(index)" :size="32" :src="assetUrl(userStore.userInfo?.avatar)">{{ initial(userStore.userInfo?.nickname) }}</el-avatar>
                   <span v-else-if="isSelf(message)" class="avatar-spacer" aria-hidden="true"></span>
@@ -166,14 +165,13 @@
           </section>
           <button v-if="showJumpToLatest" class="jump-latest" @click="jumpToLatest"><el-icon><ArrowDown /></el-icon>{{ unseenCurrentMessages ? unseenCurrentMessages + ' 条新消息' : '回到最新消息' }}</button>
         </div>
-        <div v-if="typingText" class="typing-status" role="status" aria-live="polite"><span></span><span></span><span></span>{{ typingText }}</div>
         <footer class="composer">
           <div class="composer-tools">
             <input ref="fileInputRef" class="file-input" name="attachment" type="file" accept="image/*,.pdf,.doc,.docx,.txt,.zip,.rar,.mp4,.webm" @change="uploadAttachment">
             <button :disabled="uploading" aria-label="发送文件" title="发送文件" @click="fileInputRef?.click()"><el-icon><Paperclip /></el-icon></button>
             <span>{{ uploading ? '正在上传文件…' : '支持图片、文档与压缩包，最大 50 MB' }}</span>
           </div>
-          <textarea ref="composerRef" v-model="draft" name="message" autocomplete="off" :disabled="uploading" placeholder="输入消息…" aria-label="输入消息" @input="handleDraftInput" @keydown="handleComposerKeydown"></textarea>
+          <textarea ref="composerRef" v-model="draft" name="message" autocomplete="off" :disabled="uploading" placeholder="输入消息…" aria-label="输入消息" @input="resizeComposer" @keydown="handleComposerKeydown"></textarea>
           <div class="composer-footer"><span>按 <kbd>Ctrl</kbd> + <kbd>Enter</kbd> 发送</span><button class="send-button" :disabled="!draft.trim() || !connected || uploading" @click="sendText">发送 <el-icon><Promotion /></el-icon></button></div>
         </footer>
       </template>
@@ -238,8 +236,8 @@ import { useChatStore } from '../../stores/chat'
 import { updateProfile, searchUsers as searchUsersApi } from '../../api/user'
 import { deleteFriend, sendFriendRequest } from '../../api/friend'
 import { createGroup, getGroup, getGroupMembers, inviteMembers, leaveGroup, removeMember } from '../../api/group'
-import { downloadFile, markRead, revokeMessage, resolveStoredFileUrl, uploadFile } from '../../api/message'
-import { connected, connect, disconnect, sendChatMessage, sendReadReceipt, sendTyping, subscribe } from '../../websocket'
+import { downloadFile, resolveStoredFileUrl, uploadFile } from '../../api/message'
+import { connected, connect, disconnect, sendChatMessage, subscribe } from '../../websocket'
 import { CHAT_THEMES, readStoredChatTheme, writeStoredChatTheme } from '../../theme'
 import {
   canGroupMessages,
@@ -269,7 +267,6 @@ const uploading = ref(false)
 const inspectorOpen = ref(false)
 const groupInfo = ref(null)
 const groupMembers = ref([])
-const typingUser = ref('')
 const previewingImage = ref('')
 const showJumpToLatest = ref(false)
 const unseenCurrentMessages = ref(0)
@@ -291,8 +288,6 @@ const inviteIds = ref([])
 const showProfile = ref(false)
 const savingProfile = ref(false)
 const profileForm = reactive({ username: '', nickname: '', avatar: '', signature: '', email: '', phone: '' })
-let typingTimer
-let lastTypingAt = 0
 let composerResizeFrame
 let unsubscribeCallbacks = []
 
@@ -316,7 +311,6 @@ const chatSubtitle = computed(() => {
   if (current.type === 'user') return currentOnline.value ? '在线 · 实时连接中' : '离线'
   return (groupMembers.value.length || current.member_count || '—') + ' 位成员'
 })
-const typingText = computed(() => typingUser.value ? typingUser.value + ' 正在输入…' : '')
 const connectionNotice = computed(() => {
   if (sessionWasReplaced.value) {
     return { title: '连接已在其他页面打开', description: '此页面已停止自动重连，可刷新后重新进入。' }
@@ -367,7 +361,6 @@ function lastMessage(item) {
 function messagePreview(item) {
   const message = lastMessage(item)
   if (!message) return item.type === 'group' ? '群组对话' : '开始一段对话'
-  if (message.status === 2) return '一条消息已撤回'
   if (message.content_type === 'image') return '[图片]'
   if (message.content_type === 'file') return '[文件] ' + fileName(message)
   return message.content || '新消息'
@@ -422,14 +415,12 @@ async function selectItem(item) {
   chatStore.setCurrentChat(chat)
   activeSection.value = item.type === 'group' ? 'groups' : 'chats'
   inspectorOpen.value = false
-  typingUser.value = ''
   historyLoading.value = true
   try {
     await chatStore.fetchHistory(item.id, item.type)
     if (item.type === 'group') await loadGroupDetails(item.id)
     await nextTick()
     scrollToBottom()
-    markCurrentRead()
   } finally {
     historyLoading.value = false
   }
@@ -463,7 +454,6 @@ function jumpToLatest() {
   showJumpToLatest.value = false
   unseenCurrentMessages.value = 0
   scrollToBottom('smooth')
-  markCurrentRead()
 }
 
 function handleMessageScroll() {
@@ -472,26 +462,13 @@ function handleMessageScroll() {
   if (isNearLatest()) {
     showJumpToLatest.value = false
     unseenCurrentMessages.value = 0
-    markCurrentRead()
   } else {
     showJumpToLatest.value = node.scrollHeight - node.scrollTop - node.clientHeight > 180
   }
 }
 
-function markCurrentRead() {
-  const current = chatStore.currentChat
-  const last = currentMessages.value.at(-1)
-  if (!current || !last?.msg_id || isSelf(last)) return
-  markRead({ target_id: current.id, target_type: current.type, last_msg_id: last.msg_id }).catch(() => {})
-  sendReadReceipt(current.id, current.type, last.msg_id)
-}
-
 function isSelf(message) {
   return message.from_id === userStore.userInfo?.id || message.from_user_id === userStore.userInfo?.id
-}
-
-function canRevoke(message) {
-  return isSelf(message) && message.status !== 2 && Boolean(message.msg_id)
 }
 
 function queueMessage(contentType, content) {
@@ -529,19 +506,6 @@ function handleComposerKeydown(event) {
     event.preventDefault()
     sendText()
   }
-}
-
-function handleDraftInput() {
-  resizeComposer()
-  const current = chatStore.currentChat
-  if (!current || !draft.value.trim() || !connected.value) return
-  const now = Date.now()
-  if (now - lastTypingAt > 2500) {
-    sendTyping(current.id, current.type)
-    lastTypingAt = now
-  }
-  window.clearTimeout(typingTimer)
-  typingTimer = window.setTimeout(() => { lastTypingAt = 0 }, 3000)
 }
 
 function resizeComposer() {
@@ -592,17 +556,6 @@ async function downloadAttachment(message) {
   link.click()
   link.remove()
   URL.revokeObjectURL(objectUrl)
-}
-
-async function revoke(message) {
-  try {
-    await ElMessageBox.confirm('撤回后，所有成员将看到撤回提示。', '撤回此消息？', { confirmButtonText: '撤回', cancelButtonText: '取消', type: 'warning' })
-    await revokeMessage(message.msg_id)
-    chatStore.updateMessageStatus(message.msg_id, 2)
-    ElMessage.success('消息已撤回')
-  } catch (error) {
-    if (error !== 'cancel' && error !== 'close') throw error
-  }
 }
 
 function previewImage(url) {
@@ -821,7 +774,6 @@ onMounted(async () => {
         if (key === (chatStore.currentChat && chatStore.chatKey(chatStore.currentChat.type, chatStore.currentChat.id))) {
           if (shouldFollowLatest) {
             scrollToBottom()
-            markCurrentRead()
           } else {
             unseenCurrentMessages.value += 1
             showJumpToLatest.value = true
@@ -835,16 +787,6 @@ onMounted(async () => {
         })
       }),
       subscribe('onlineStatus', (status) => chatStore.setOnlineStatus(status.user_id, status.online)),
-      subscribe('typing', (message) => {
-        const data = message.data || {}
-        const current = chatStore.currentChat
-        const matches = current && ((current.type === 'group' && current.id === message.to_id) || (current.type === 'user' && current.id === data.user_id))
-        if (matches && data.user_id !== userStore.userInfo?.id) {
-          typingUser.value = data.username || '对方'
-          window.clearTimeout(typingTimer)
-          typingTimer = window.setTimeout(() => { typingUser.value = '' }, 2800)
-        }
-      }),
       subscribe('sessionReplaced', () => {
         sessionWasReplaced.value = true
         ElMessage.warning('当前连接已被新会话替换，已停止自动重连')
@@ -859,7 +801,6 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe())
-  window.clearTimeout(typingTimer)
   window.cancelAnimationFrame(composerResizeFrame)
   disconnect()
   delete document.documentElement.dataset.chatTheme
@@ -870,7 +811,7 @@ onBeforeUnmount(() => {
 .workspace { --forest:#19362c; --forest-soft:#28543d; --mint:#dcefd0; --lime:#bfe879; --ink:#1d2821; --muted:#7a887e; --line:#e6ebe4; display:grid; grid-template-columns:64px 306px minmax(0,1fr); min-height:100svh; overflow:hidden; color:var(--ink); background:#f7f8f5; }
 .app-rail { display:flex; flex-direction:column; align-items:center; padding:16px 0; color:#b6c8b9; background:var(--forest); }.rail-logo { display:flex; align-items:flex-end; justify-content:center; gap:3px; width:34px; height:34px; padding:0 7px 7px; border:0; border-radius:10px; cursor:pointer; background:var(--mint); }.rail-logo span { width:4px; border-radius:10px; background:var(--forest); }.rail-logo span:nth-child(1){height:9px}.rail-logo span:nth-child(2){height:16px}.rail-logo span:nth-child(3){height:22px}.rail-nav { display:grid; gap:10px; margin-top:43px; }.rail-nav button,.rail-bottom button { position:relative; display:grid; place-items:center; width:42px; height:42px; border:0; border-radius:11px; color:#b6c8b9; cursor:pointer; background:transparent; transition:color .18s,background .18s,transform .18s; }.rail-nav button:hover,.rail-bottom button:hover { color:#fff; background:rgba(255,255,255,.09); }.rail-nav button.active { color:var(--forest); background:var(--mint); }.rail-nav .el-icon { font-size:20px; }.rail-nav b { position:absolute; top:-4px; right:-7px; min-width:17px; padding:2px 4px; border:2px solid var(--forest); border-radius:10px; color:#fff; background:#e96061; font-size:9px; line-height:1; }.rail-bottom { margin-top:auto; }.rail-bottom button { overflow:hidden; }
 .conversation-pane { position:relative; display:flex; flex-direction:column; min-width:0; border-right:1px solid var(--line); background:#fff; }.pane-head { display:flex; align-items:center; justify-content:space-between; min-height:76px; padding:0 18px 0 20px; }.identity { display:flex; align-items:center; gap:10px; }.identity strong { display:block; font-size:13px; line-height:1.3; }.identity small { display:block; margin-top:2px; color:var(--muted); font-size:11px; }.connection-dot { width:8px; height:8px; border-radius:50%; background:#b9c2ba; }.connection-dot.connected { background:#65af71; box-shadow:0 0 0 4px rgba(101,175,113,.11); }.icon-button { display:grid; place-items:center; width:32px; height:32px; border:0; border-radius:8px; color:#7c897f; cursor:pointer; background:transparent; transition:background .18s,color .18s; }.icon-button:hover,.icon-button.selected { color:#244630; background:#edf3e9; }.icon-button .el-icon { font-size:18px; }.section-tabs { display:flex; gap:4px; padding:0 15px 14px; }.section-tabs button { flex:1; height:32px; border:0; border-radius:7px; color:#87938a; cursor:pointer; background:transparent; font-size:12px; font-weight:700; }.section-tabs button:hover { color:#355b40; background:#f4f7f2; }.section-tabs button.active { color:#28583c; background:#eaf4e5; }.search-field { display:flex; align-items:center; gap:8px; height:36px; margin:0 17px; padding:0 10px; border:1px solid #e6ece3; border-radius:8px; color:#91a096; background:#f8faf7; transition:border .18s,background .18s; }.search-field:focus-within { border-color:#8ab38b; background:#fff; }.search-field .el-icon { font-size:15px; }.search-field input { width:100%; min-width:0; border:0; outline:0; color:#26332b; background:transparent; font-size:12px; }.search-field input::placeholder { color:#9aa59d; }.search-field button { display:grid; place-items:center; padding:0; border:0; color:#98a39b; cursor:pointer; background:transparent; }.list-heading { display:flex; align-items:center; justify-content:space-between; padding:24px 20px 10px; color:#69776e; font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }.small-action { display:inline-flex; align-items:center; gap:3px; padding:3px 0; border:0; color:#397044; cursor:pointer; background:none; font-size:11px; font-weight:800; }.small-action:hover { color:#173f25; }.small-action .el-icon { font-size:13px; }.session-list { flex:1; overflow-y:auto; padding:0 9px 15px; }.session-row { display:flex; align-items:center; gap:10px; width:100%; padding:10px 10px; border:0; border-radius:10px; color:inherit; cursor:pointer; text-align:left; background:transparent; transition:background .16s,transform .16s; }.session-row:hover { background:#f5f8f3; }.session-row.active { background:#eaf4e5; }.avatar-wrap { position:relative; display:inline-grid; flex:0 0 auto; place-items:center; }.avatar-wrap > i { position:absolute; right:-1px; bottom:0; width:10px; height:10px; border:2px solid #fff; border-radius:50%; background:#65af71; }.group-avatar-mark { position:absolute; right:-4px; bottom:-3px; display:grid; place-items:center; width:14px; height:14px; border:1px solid #fff; border-radius:50%; color:#477250; background:#d9ebd4; }.group-avatar-mark .el-icon { font-size:8px; }.row-copy { min-width:0; flex:1; }.row-top,.row-bottom { display:flex; align-items:center; justify-content:space-between; gap:6px; }.row-top strong { overflow:hidden; color:#2a382f; font-size:13px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }.row-top time { flex:0 0 auto; color:#a0aca2; font-size:10px; }.row-bottom { margin-top:4px; }.row-bottom > span { overflow:hidden; color:#929d94; font-size:11px; text-overflow:ellipsis; white-space:nowrap; }.row-bottom em { display:grid; flex:0 0 auto; place-items:center; min-width:16px; height:16px; padding:0 4px; border-radius:8px; color:#fff; background:#4d9457; font-size:9px; font-style:normal; font-weight:800; }.list-empty { display:grid; place-items:center; align-content:center; min-height:210px; padding:20px; color:#9aa59d; text-align:center; }.list-empty .el-icon { font-size:30px; color:#b7c5b8; }.list-empty p { margin:10px 0; font-size:12px; }.list-empty button { border:0; color:#397044; cursor:pointer; background:none; font-size:12px; font-weight:800; }.context-menu { position:fixed; z-index:50; min-width:145px; padding:5px; border:1px solid #e6ebe4; border-radius:9px; box-shadow:0 14px 30px rgba(23,45,30,.13); background:#fff; }.context-menu button { display:block; width:100%; padding:8px 10px; border:0; border-radius:6px; color:#59675d; cursor:pointer; text-align:left; background:transparent; font-size:12px; }.context-menu button:hover { background:#f4f7f2; }.context-menu .danger { color:#bd4e52; }
-.chat-stage { display:flex; flex-direction:column; min-width:0; min-height:0; background:#f8faf7; }.chat-header { display:flex; align-items:center; justify-content:space-between; min-height:76px; padding:0 28px; border-bottom:1px solid var(--line); background:rgba(255,255,255,.74); }.mobile-back { display:none; }.chat-title { display:flex; align-items:center; gap:11px; min-width:0; }.chat-title h1 { overflow:hidden; margin:0; color:#26342b; font-size:15px; letter-spacing:-.02em; text-overflow:ellipsis; white-space:nowrap; }.chat-title p { margin:3px 0 0; color:#8b988f; font-size:11px; }.detail-button { width:35px; height:35px; }.messages { flex:1; min-height:0; overflow-y:auto; padding:28px clamp(22px,5vw,78px); scroll-behavior:smooth; }.message-stack { display:flex; flex-direction:column; gap:22px; max-width:880px; margin:auto; }.message-row { display:flex; align-items:flex-start; gap:9px; }.message-row.self { flex-direction:row-reverse; }.message-body { max-width:min(74%,570px); }.sender-name { margin:0 0 4px 3px; color:#809086; font-size:11px; }.bubble { min-width:48px; padding:10px 13px; border:1px solid #e5ebe3; border-radius:4px 15px 15px 15px; color:#27352c; background:#fff; box-shadow:0 2px 4px rgba(34,55,39,.025); font-size:13px; line-height:1.65; word-break:break-word; }.self .bubble { border-color:#d6e7c9; border-radius:15px 4px 15px 15px; color:#24402b; background:#e0f1d4; }.recalled .bubble { padding:7px 11px; border-color:transparent; color:#9aa49d; background:#eef1ed; font-size:12px; font-style:italic; }.recalled { color:#9aa49d; }.message-meta { display:flex; align-items:center; gap:6px; margin:4px 3px 0; color:#a1aaa3; font-size:10px; }.self .message-meta { justify-content:flex-end; }.message-meta .failed { color:#c65c5e; }.message-meta button { display:inline-flex; align-items:center; gap:2px; padding:0; border:0; color:#9ca69e; cursor:pointer; background:transparent; font-size:10px; }.message-meta button:hover { color:#be595c; }.message-meta .el-icon { font-size:11px; }.image-message { display:block; max-width:min(330px,60vw); max-height:300px; border-radius:9px; cursor:zoom-in; object-fit:contain; }.file-message { display:flex; align-items:center; gap:10px; min-width:190px; color:#315d3a; text-decoration:none; }.file-message > .el-icon:first-child { display:grid; flex:0 0 auto; place-items:center; width:32px; height:32px; border-radius:8px; color:#477d50; background:#d5ebcc; font-size:17px; }.file-message span { min-width:0; flex:1; }.file-message strong,.file-message small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.file-message strong { font-size:12px; }.file-message small { margin-top:1px; color:#7f9581; font-size:10px; }.file-message > .el-icon:last-child { font-size:15px; }.history-state { display:flex; justify-content:center; gap:7px; padding:25px; color:#89968c; font-size:12px; }.conversation-empty { display:grid; place-items:center; align-content:center; min-height:100%; color:#87958b; text-align:center; }.empty-orb { display:grid; place-items:center; width:52px; height:52px; margin-bottom:13px; border-radius:20px; color:#477854; background:#e5f0df; }.empty-orb .el-icon { font-size:24px; }.conversation-empty strong { color:#4c5e51; font-size:14px; }.conversation-empty p { margin:6px 0; font-size:12px; }.typing-status { display:flex; align-items:center; gap:3px; min-height:24px; padding:0 clamp(22px,5vw,78px); color:#849086; background:#fff; font-size:10px; }.typing-status span { width:4px; height:4px; border-radius:50%; background:#6b9f70; animation:dot-bounce 1s infinite ease-in-out; }.typing-status span:nth-child(2){animation-delay:.16s}.typing-status span:nth-child(3){animation-delay:.32s;margin-right:4px}@keyframes dot-bounce{50%{transform:translateY(-3px);opacity:.45}}.composer { padding:13px clamp(22px,5vw,78px) 16px; border-top:1px solid var(--line); background:#fff; }.composer-tools { display:flex; align-items:center; gap:8px; min-height:27px; color:#94a098; font-size:10px; }.composer-tools button { display:grid; place-items:center; width:27px; height:25px; padding:0; border:0; border-radius:6px; color:#617568; cursor:pointer; background:transparent; }.composer-tools button:hover { color:#28583c; background:#eef5ea; }.composer-tools button:disabled { opacity:.5; cursor:not-allowed; }.composer-tools .el-icon { font-size:17px; }.file-input { display:none; }.composer textarea { display:block; width:100%; min-height:56px; max-height:160px; margin:3px 0; padding:5px 0; border:0; outline:0; resize:vertical; color:#27352b; background:transparent; font-size:13px; line-height:1.6; }.composer textarea::placeholder { color:#a7b0a9; }.composer-footer { display:flex; align-items:center; justify-content:space-between; color:#9ba69e; font-size:10px; }.composer-footer kbd { padding:1px 4px; border:1px solid #dbe2da; border-radius:3px; background:#f6f8f5; font-family:inherit; font-size:9px; }.send-button { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 13px; border:0; border-radius:7px; color:#f6faf4; cursor:pointer; background:#315f3d; font-size:11px; font-weight:800; transition:background .16s,transform .16s; }.send-button:hover:not(:disabled) { background:#1e4a2c; transform:translateY(-1px); }.send-button:disabled { color:#a7b2a8; cursor:not-allowed; background:#e7ebe6; }
+.chat-stage { display:flex; flex-direction:column; min-width:0; min-height:0; background:#f8faf7; }.chat-header { display:flex; align-items:center; justify-content:space-between; min-height:76px; padding:0 28px; border-bottom:1px solid var(--line); background:rgba(255,255,255,.74); }.mobile-back { display:none; }.chat-title { display:flex; align-items:center; gap:11px; min-width:0; }.chat-title h1 { overflow:hidden; margin:0; color:#26342b; font-size:15px; letter-spacing:-.02em; text-overflow:ellipsis; white-space:nowrap; }.chat-title p { margin:3px 0 0; color:#8b988f; font-size:11px; }.detail-button { width:35px; height:35px; }.messages { flex:1; min-height:0; overflow-y:auto; padding:28px clamp(22px,5vw,78px); scroll-behavior:smooth; }.message-stack { display:flex; flex-direction:column; gap:22px; max-width:880px; margin:auto; }.message-row { display:flex; align-items:flex-start; gap:9px; }.message-row.self { flex-direction:row-reverse; }.message-body { max-width:min(74%,570px); }.sender-name { margin:0 0 4px 3px; color:#809086; font-size:11px; }.bubble { min-width:48px; padding:10px 13px; border:1px solid #e5ebe3; border-radius:4px 15px 15px 15px; color:#27352c; background:#fff; box-shadow:0 2px 4px rgba(34,55,39,.025); font-size:13px; line-height:1.65; word-break:break-word; }.self .bubble { border-color:#d6e7c9; border-radius:15px 4px 15px 15px; color:#24402b; background:#e0f1d4; }.message-meta { display:flex; align-items:center; gap:6px; margin:4px 3px 0; color:#a1aaa3; font-size:10px; }.self .message-meta { justify-content:flex-end; }.message-meta .failed { color:#c65c5e; }.image-message { display:block; max-width:min(330px,60vw); max-height:300px; border-radius:9px; cursor:zoom-in; object-fit:contain; }.file-message { display:flex; align-items:center; gap:10px; min-width:190px; color:#315d3a; text-decoration:none; }.file-message > .el-icon:first-child { display:grid; flex:0 0 auto; place-items:center; width:32px; height:32px; border-radius:8px; color:#477d50; background:#d5ebcc; font-size:17px; }.file-message span { min-width:0; flex:1; }.file-message strong,.file-message small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.file-message strong { font-size:12px; }.file-message small { margin-top:1px; color:#7f9581; font-size:10px; }.file-message > .el-icon:last-child { font-size:15px; }.history-state { display:flex; justify-content:center; gap:7px; padding:25px; color:#89968c; font-size:12px; }.conversation-empty { display:grid; place-items:center; align-content:center; min-height:100%; color:#87958b; text-align:center; }.empty-orb { display:grid; place-items:center; width:52px; height:52px; margin-bottom:13px; border-radius:20px; color:#477854; background:#e5f0df; }.empty-orb .el-icon { font-size:24px; }.conversation-empty strong { color:#4c5e51; font-size:14px; }.conversation-empty p { margin:6px 0; font-size:12px; }.composer { padding:13px clamp(22px,5vw,78px) 16px; border-top:1px solid var(--line); background:#fff; }.composer-tools { display:flex; align-items:center; gap:8px; min-height:27px; color:#94a098; font-size:10px; }.composer-tools button { display:grid; place-items:center; width:27px; height:25px; padding:0; border:0; border-radius:6px; color:#617568; cursor:pointer; background:transparent; }.composer-tools button:hover { color:#28583c; background:#eef5ea; }.composer-tools button:disabled { opacity:.5; cursor:not-allowed; }.composer-tools .el-icon { font-size:17px; }.file-input { display:none; }.composer textarea { display:block; width:100%; min-height:56px; max-height:160px; margin:3px 0; padding:5px 0; border:0; outline:0; resize:vertical; color:#27352b; background:transparent; font-size:13px; line-height:1.6; }.composer textarea::placeholder { color:#a7b0a9; }.composer-footer { display:flex; align-items:center; justify-content:space-between; color:#9ba69e; font-size:10px; }.composer-footer kbd { padding:1px 4px; border:1px solid #dbe2da; border-radius:3px; background:#f6f8f5; font-family:inherit; font-size:9px; }.send-button { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 13px; border:0; border-radius:7px; color:#f6faf4; cursor:pointer; background:#315f3d; font-size:11px; font-weight:800; transition:background .16s,transform .16s; }.send-button:hover:not(:disabled) { background:#1e4a2c; transform:translateY(-1px); }.send-button:disabled { color:#a7b2a8; cursor:not-allowed; background:#e7ebe6; }
 .welcome-stage { display:grid; flex:1; place-items:center; align-content:center; padding:35px; color:#728076; text-align:center; }.welcome-art { position:relative; width:104px; height:88px; margin-bottom:20px; }.welcome-art span { position:absolute; display:block; border:2px solid #5d9367; border-radius:16px; background:#e7f3df; }.welcome-art span:nth-child(1) { top:3px; left:7px; width:69px; height:51px; }.welcome-art span:nth-child(2) { right:2px; bottom:1px; width:62px; height:47px; border-color:#8db172; background:#f4faef; }.welcome-art span:nth-child(3) { bottom:11px; left:0; width:18px; height:18px; border:0; border-radius:50%; background:#bcdf91; }.welcome-stage .eyebrow { color:#76a679; }.welcome-stage h1 { max-width:500px; margin:12px 0 8px; color:#33453a; font-size:clamp(24px,3vw,34px); letter-spacing:-.055em; }.welcome-stage > p:last-of-type { max-width:350px; margin:0; font-size:13px; line-height:1.7; }.welcome-stage button { display:inline-flex; align-items:center; gap:5px; margin-top:23px; padding:9px 13px; border:1px solid #cce0c8; border-radius:8px; color:#315f3d; cursor:pointer; background:#fff; font-size:12px; font-weight:800; }.welcome-stage button:hover { background:#eef6ea; }
 .inspector { display:flex; flex-direction:column; width:286px; min-height:0; border-left:1px solid var(--line); background:#fff; animation:inspector-in .2s ease-out; }.inspector > header { display:flex; align-items:center; justify-content:space-between; min-height:76px; padding:0 18px; border-bottom:1px solid var(--line); color:#56655a; font-size:12px; font-weight:800; }.inspector-profile { padding:25px 18px 22px; border-bottom:1px solid var(--line); text-align:center; }.inspector-profile h2 { margin:10px 0 3px; color:#314038; font-size:16px; letter-spacing:-.03em; }.inspector-profile p { margin:0; color:#8a978d; font-size:11px; }.detail-section { padding:19px 18px; border-bottom:1px solid #eef1ed; }.detail-label { color:#87958a; font-size:10px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }.detail-section > p { margin:8px 0 0; color:#506055; font-size:12px; line-height:1.7; }.detail-title { display:flex; align-items:center; justify-content:space-between; color:#65736a; font-size:11px; font-weight:800; }.detail-title button { display:inline-flex; align-items:center; gap:2px; padding:0; border:0; color:#3d7548; cursor:pointer; background:none; font-size:11px; font-weight:800; }.member-list { max-height:220px; margin-top:11px; overflow-y:auto; }.member-row { display:flex; align-items:center; gap:8px; min-height:39px; }.member-row > span { overflow:hidden; flex:1; color:#4d5d52; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }.member-row em { color:#7c9b70; font-size:10px; font-style:normal; }.member-row button { display:grid; place-items:center; padding:3px; border:0; color:#a5aea6; cursor:pointer; background:transparent; }.member-row button:hover { color:#be595c; }.danger-zone { margin-top:auto; padding:16px 18px; }.danger-zone button { width:100%; height:34px; border:1px solid #f0d4d5; border-radius:7px; color:#b95659; cursor:pointer; background:#fffafa; font-size:11px; font-weight:800; }.danger-zone button:hover { background:#fff1f1; }@keyframes inspector-in{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:translateX(0)}}.message-enter-active{transition:opacity .22s ease,transform .22s ease}.message-enter-from{opacity:0;transform:translateY(8px)}
 .dialog-note { margin:0 0 16px; color:#758278; font-size:12px; line-height:1.6; }.dialog-search { display:flex; gap:9px; }.user-results { margin-top:14px; }.user-result { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid #edf1ec; }.user-result > div { min-width:0; flex:1; }.user-result strong,.user-result small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.user-result strong { color:#35443a; font-size:13px; }.user-result small { margin-top:2px; color:#91a097; font-size:11px; }.user-result :deep(.el-button) { border-radius:7px; font-size:12px; }.two-fields { display:grid; grid-template-columns:1fr 1fr; gap:12px; }.app-dialog :deep(.el-dialog) { border-radius:13px; }.app-dialog :deep(.el-dialog__header) { margin-right:0; padding:20px 22px 11px; }.app-dialog :deep(.el-dialog__title) { color:#344238; font-size:16px; font-weight:800; }.app-dialog :deep(.el-dialog__body) { padding:13px 22px 17px; }.app-dialog :deep(.el-dialog__footer) { padding:10px 22px 19px; }.app-dialog :deep(.el-form-item) { margin-bottom:14px; }.app-dialog :deep(.el-form-item__label) { padding-bottom:5px; color:#66736a; font-size:12px; font-weight:700; }.app-dialog :deep(.el-input__wrapper),.app-dialog :deep(.el-textarea__inner),.app-dialog :deep(.el-select__wrapper) { border-radius:8px; box-shadow:0 0 0 1px #e0e7df inset; }.app-dialog :deep(.el-button--primary) { border-color:#315f3d; background:#315f3d; }
@@ -918,7 +859,6 @@ onBeforeUnmount(() => {
 .workspace[data-theme='glass'] .chat-stage { background:rgba(247,251,249,.3); }
 .workspace[data-theme='glass'] .chat-header,
 .workspace[data-theme='glass'] .composer,
-.workspace[data-theme='glass'] .typing-status,
 .workspace[data-theme='glass'] .inspector > header { border-color:rgba(255,255,255,.52); background:rgba(255,255,255,.48); backdrop-filter:blur(20px) saturate(135%); -webkit-backdrop-filter:blur(20px) saturate(135%); }
 .workspace[data-theme='glass'] .search-field { border-color:rgba(255,255,255,.72); background:rgba(255,255,255,.42); box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 8px 22px rgba(52,77,69,.05); }
 .workspace[data-theme='glass'] .search-field:focus-within { border-color:rgba(86,137,106,.46); background:rgba(255,255,255,.7); box-shadow:0 0 0 3px rgba(102,155,121,.1); }
@@ -930,7 +870,6 @@ onBeforeUnmount(() => {
 .workspace[data-theme='glass'] .icon-button.selected { background:rgba(225,244,222,.68); box-shadow:inset 0 0 0 1px rgba(255,255,255,.55),0 8px 20px rgba(54,87,67,.06); }
 .workspace[data-theme='glass'] .bubble { border-color:rgba(255,255,255,.72); background:rgba(255,255,255,.78); box-shadow:0 8px 24px rgba(43,68,59,.07),inset 0 1px 0 rgba(255,255,255,.82); }
 .workspace[data-theme='glass'] .self .bubble { border-color:rgba(222,247,210,.76); background:rgba(218,241,205,.72); }
-.workspace[data-theme='glass'] .message-row.revoked .bubble { box-shadow:none; background:rgba(237,242,239,.62); }
 .workspace[data-theme='glass'] .theme-menu,
 .workspace[data-theme='glass'] .context-menu { border-color:rgba(255,255,255,.68); background:rgba(248,252,250,.76); box-shadow:0 20px 50px rgba(42,68,60,.16),inset 0 1px 0 rgba(255,255,255,.8); backdrop-filter:blur(24px) saturate(145%); -webkit-backdrop-filter:blur(24px) saturate(145%); }
 .workspace[data-theme='glass'] .theme-option:hover { background:rgba(255,255,255,.46); }
@@ -959,7 +898,6 @@ onBeforeUnmount(() => {
 .workspace[data-theme='neumorphic'] .chat-stage,
 .workspace[data-theme='neumorphic'] .chat-header,
 .workspace[data-theme='neumorphic'] .composer,
-.workspace[data-theme='neumorphic'] .typing-status,
 .workspace[data-theme='neumorphic'] .inspector,
 .workspace[data-theme='neumorphic'] .inspector > header { border:0; background:var(--neu-surface); }
 .workspace[data-theme='neumorphic'] .app-rail { color:#597065; box-shadow:inset -1px 0 rgba(177,188,179,.36); }
@@ -990,7 +928,6 @@ onBeforeUnmount(() => {
 .workspace[data-theme='neumorphic'] .avatar-wrap > i { border-color:var(--neu-surface); }
 .workspace[data-theme='neumorphic'] .bubble { padding:11px 15px; border:0; border-radius:18px 18px 18px 6px; background:var(--neu-surface); box-shadow:4px 4px 9px rgba(180,190,182,.72),-4px -4px 9px rgba(255,255,255,.78); }
 .workspace[data-theme='neumorphic'] .self .bubble { border:0; border-radius:18px 18px 6px 18px; color:#284832; background:#dce9d8; box-shadow:4px 4px 9px rgba(177,188,179,.68),-3px -3px 8px rgba(255,255,255,.7); }
-.workspace[data-theme='neumorphic'] .message-row.revoked .bubble { color:#8b978e; background:var(--neu-surface); box-shadow:inset 3px 3px 6px var(--neu-dark),inset -3px -3px 6px var(--neu-light); }
 .workspace[data-theme='neumorphic'] .file-message > .el-icon:first-child { background:transparent; }
 .workspace[data-theme='neumorphic'] .composer textarea { min-height:64px; padding:9px 12px; border-radius:12px; background:var(--neu-surface); box-shadow:inset 3px 3px 7px var(--neu-dark),inset -3px -3px 7px var(--neu-light); resize:none; }
 .workspace[data-theme='neumorphic'] .send-button { color:#315d43; }

@@ -10,8 +10,8 @@
 - 个人资料查询和更新，用户搜索
 - 联系人添加、列表查询与删除
 - 群组创建、成员查询、邀请、移除与退出
-- 私聊、群聊、历史消息查询、已读回执、消息撤回
-- WebSocket 心跳、自动重连、在线状态、正在输入和发送确认
+- 私聊、群聊与历史消息查询
+- WebSocket 心跳、自动重连、在线状态和发送确认
 - 图片与文件上传、受鉴权的文件下载
 - 统一错误提示、路由鉴权、响应式聊天界面
 
@@ -127,10 +127,10 @@ npm run dev
 | 用户 | GET/PUT /user/profile、GET /users/search |
 | 联系人 | GET /friends、POST /friends/request、DELETE /friends/:friend_id |
 | 群组 | GET/POST /groups、群详情、成员查询/邀请/移除、退出 |
-| 消息 | GET /messages、POST /messages/read、POST /messages/:msg_id/revoke |
+| 消息 | GET /messages |
 | 文件 | POST /files/upload、GET /files/:file_id/download |
 
-WebSocket 地址：ws://localhost:8080/ws?token=token。客户端支持 chat、read_receipt、typing 三类事件；服务端会推送 chat、chat_ack、online_status 和 typing。
+WebSocket 地址：ws://localhost:8080/ws?token=token。客户端发送 chat 事件；服务端会推送 chat、chat_ack 和 online_status。
 
 ## 验证
 

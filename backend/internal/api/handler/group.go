@@ -137,7 +137,7 @@ func (h *GroupHandler) GetGroups(c *gin.Context) {
 		Select("g.*").
 		Joins("JOIN group_members AS gm ON gm.group_id = g.id").
 		Where(
-			"gm.user_id = ? AND gm.status = ? AND g.status = ?",
+			"gm.user_id = ? AND gm.status = ? AND g.status = ? AND g.deleted_at IS NULL",
 			currentUserID,
 			model.GroupMemberStatusActive,
 			model.GroupStatusActive,
@@ -228,7 +228,7 @@ func (h *GroupHandler) GetMembers(c *gin.Context) {
 		`).
 		Joins("JOIN users AS u ON u.id = gm.user_id").
 		Where(
-			"gm.group_id = ? AND gm.status = ? AND u.status = ?",
+			"gm.group_id = ? AND gm.status = ? AND u.status = ? AND u.deleted_at IS NULL",
 			groupID,
 			model.GroupMemberStatusActive,
 			model.UserStatusActive,

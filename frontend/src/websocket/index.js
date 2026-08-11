@@ -7,7 +7,6 @@ const connected = ref(false)
 const callbacks = {
   message: new Set(),
   onlineStatus: new Set(),
-  typing: new Set(),
   ack: new Set(),
   sessionReplaced: new Set()
 }
@@ -61,7 +60,6 @@ export function connect(token) {
       const message = JSON.parse(event.data)
       if (message.type === 'chat') notify('message', message)
       if (message.type === 'online_status') notify('onlineStatus', message.data || message)
-      if (message.type === 'typing') notify('typing', message)
       if (message.type === 'chat_ack') notify('ack', message.data || message)
     } catch {
       // 无法解析的帧不应中断当前连接。
@@ -122,20 +120,6 @@ export function sendChatMessage({ msgId = createMessageId(), toId, toType, conte
     }
   })
   return sent ? msgId : ''
-}
-
-export function sendReadReceipt(targetId, targetType, lastMsgId) {
-  return sendMessage({
-    type: 'read_receipt',
-    data: { target_id: targetId, target_type: targetType, last_msg_id: lastMsgId }
-  })
-}
-
-export function sendTyping(targetId, targetType) {
-  return sendMessage({
-    type: 'typing',
-    data: { target_id: targetId, target_type: targetType }
-  })
 }
 
 export function subscribe(type, callback) {

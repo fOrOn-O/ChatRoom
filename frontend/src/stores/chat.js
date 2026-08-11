@@ -61,7 +61,7 @@ export const useChatStore = defineStore('chat', () => {
     const key = messageKey(message)
     const list = chatMessages[key] || (chatMessages[key] = [])
     const existingIndex = list.findIndex((item) => item.msg_id === message.msg_id)
-    const normalized = { status: 1, ...message, timestamp: messageTime(message) }
+    const normalized = { ...message, timestamp: messageTime(message) }
     if (existingIndex >= 0) list.splice(existingIndex, 1, { ...list[existingIndex], ...normalized })
     else list.push(normalized)
 
@@ -69,13 +69,6 @@ export const useChatStore = defineStore('chat', () => {
       unreadCounts[key] = (unreadCounts[key] || 0) + 1
     }
     return key
-  }
-
-  function updateMessageStatus(msgId, status) {
-    Object.values(chatMessages).forEach((list) => {
-      const message = list.find((item) => item.msg_id === msgId)
-      if (message) message.status = status
-    })
   }
 
   function setOnlineStatus(userId, online) {
@@ -97,6 +90,6 @@ export const useChatStore = defineStore('chat', () => {
   return {
     friends, groups, sessions, currentChat, chatMessages, unreadCounts, onlineUsers,
     fetchFriends, fetchGroups, setCurrentChat, fetchHistory, addMessage,
-    updateMessageStatus, setOnlineStatus, removeFriend, removeGroup, chatKey
+    setOnlineStatus, removeFriend, removeGroup, chatKey
   }
 })

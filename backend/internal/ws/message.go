@@ -36,8 +36,6 @@ type Message struct {
 const (
 	MsgTypeChat         = "chat"          // 聊天消息
 	MsgTypeChatAck      = "chat_ack"      // 消息确认
-	MsgTypeReadReceipt  = "read_receipt"  // 已读回执
-	MsgTypeTyping       = "typing"        // 正在输入
 	MsgTypeOnlineStatus = "online_status" // 在线状态
 	MsgTypeAuth         = "auth"          // 认证
 	MsgTypeAuthSuccess  = "auth_success"  // 认证成功

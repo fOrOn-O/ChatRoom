@@ -110,8 +110,6 @@ func (r *Router) setupRoutes() {
 			message := authorized.Group("/messages")
 			{
 				message.GET("", messageHandler.GetHistory)
-				message.POST("/read", messageHandler.MarkRead)
-				message.POST("/:msg_id/revoke", messageHandler.RevokeMessage)
 			}
 
 			// 文件相关

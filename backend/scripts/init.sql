@@ -86,7 +86,6 @@ CREATE TABLE IF NOT EXISTS `messages` (
     `content_type` ENUM('text', 'image', 'file', 'system') NOT NULL DEFAULT 'text' COMMENT '内容类型',
     `content` TEXT NOT NULL COMMENT '消息内容',
     `extra` JSON DEFAULT NULL COMMENT '扩展信息',
-    `status` TINYINT NOT NULL DEFAULT 1 COMMENT '状态: 0=已删除 1=正常 2=已撤回',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_msg_id` (`msg_id`),
@@ -95,20 +94,6 @@ CREATE TABLE IF NOT EXISTS `messages` (
     KEY `idx_created_at` (`created_at`),
     CONSTRAINT `fk_messages_from_user` FOREIGN KEY (`from_user_id`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='消息表';
-
--- 已读回执表
-CREATE TABLE IF NOT EXISTS `read_receipts` (
-    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    `user_id` BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
-    `target_id` BIGINT UNSIGNED NOT NULL COMMENT '目标ID(用户ID或群组ID)',
-    `target_type` ENUM('user', 'group') NOT NULL COMMENT '目标类型',
-    `last_read_msg` VARCHAR(36) NOT NULL COMMENT '最后已读消息ID',
-    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_user_target` (`user_id`, `target_id`, `target_type`),
-    CONSTRAINT `fk_read_receipts_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='已读回执表';
 
 -- 文件表
 CREATE TABLE IF NOT EXISTS `files` (

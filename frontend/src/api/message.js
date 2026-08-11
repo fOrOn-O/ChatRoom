@@ -5,16 +5,6 @@ export function getHistory(params) {
   return api.get('/messages', { params })
 }
 
-// 标记已读
-export function markRead(data) {
-  return api.post('/messages/read', data)
-}
-
-// 撤回消息
-export function revokeMessage(msgId) {
-  return api.post(`/messages/${msgId}/revoke`)
-}
-
 // 上传文件
 export function uploadFile(file) {
   const formData = new FormData()

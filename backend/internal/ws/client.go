@@ -167,10 +167,6 @@ func (c *Client) handleMessage(hub *Hub, data []byte) {
 	switch msg.Type {
 	case "chat":
 		c.handleChatMessage(hub, msg.Data)
-	case "read_receipt":
-		c.handleReadReceipt(hub, msg.Data)
-	case "typing":
-		c.handleTyping(hub, msg.Data)
 	default:
 		log.Printf("未知消息类型: %s", msg.Type)
 	}
@@ -210,56 +206,6 @@ func (c *Client) handleChatMessage(hub *Hub, data json.RawMessage) {
 		hub.SendGroup(msg)
 	default:
 		log.Printf("未知的接收类型: %s", chatMsg.ToType)
-	}
-}
-
-// handleReadReceipt 处理已读回执
-func (c *Client) handleReadReceipt(hub *Hub, data json.RawMessage) {
-	var receipt struct {
-		TargetID   uint   `json:"target_id"`
-		TargetType string `json:"target_type"`
-		LastMsgID  string `json:"last_msg_id"`
-	}
-
-	if err := json.Unmarshal(data, &receipt); err != nil {
-		log.Printf("已读回执解析失败: %v", err)
-		return
-	}
-
-	// TODO: 更新已读状态到数据库
-	log.Printf("用户 %d 已读 %s %d 的消息到 %s", c.UserID, receipt.TargetType, receipt.TargetID, receipt.LastMsgID)
-}
-
-// handleTyping 处理正在输入状态
-func (c *Client) handleTyping(hub *Hub, data json.RawMessage) {
-	var typing struct {
-		TargetID   uint   `json:"target_id"`
-		TargetType string `json:"target_type"`
-	}
-
-	if err := json.Unmarshal(data, &typing); err != nil {
-		log.Printf("输入状态解析失败: %v", err)
-		return
-	}
-
-	// 转发输入状态给目标
-	msg := &Message{
-		Type:   "typing",
-		ToID:   typing.TargetID,
-		ToType: typing.TargetType,
-		Data: map[string]interface{}{
-			"user_id":     c.UserID,
-			"username":    c.Username,
-			"target_id":   typing.TargetID,
-			"target_type": typing.TargetType,
-		},
-	}
-
-	switch typing.TargetType {
-	case "user":
-		hub.SendPrivate(msg)
-	case "group":
-		hub.SendGroup(msg)
 	}
 }
 

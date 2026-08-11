@@ -322,8 +322,8 @@ func (h *Hub) saveMessage(msg *Message) {
 
 	// 直接执行SQL插入
 	h.db.Exec(
-		"INSERT INTO messages (msg_id, from_user_id, to_id, to_type, content_type, content, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
-		msg.MsgID, msg.FromID, msg.ToID, msg.ToType, msg.ContentType, msg.Content, 1,
+		"INSERT INTO messages (msg_id, from_user_id, to_id, to_type, content_type, content, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
+		msg.MsgID, msg.FromID, msg.ToID, msg.ToType, msg.ContentType, msg.Content,
 	)
 }
 

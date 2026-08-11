@@ -14,7 +14,6 @@ type Message struct {
 	ContentType string    `json:"content_type" gorm:"size:20;not null;default:text"`
 	Content     string    `json:"content" gorm:"type:text;not null"`
 	Extra       string    `json:"extra" gorm:"type:json"` // 扩展信息
-	Status      int       `json:"status" gorm:"default:1;not null"` // 0=已删除 1=正常 2=已撤回
 	CreatedAt   time.Time `json:"created_at"`
 }
 
