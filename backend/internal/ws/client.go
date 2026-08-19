@@ -203,6 +203,11 @@ func (c *Client) handleChatMessage(hub *Hub, data json.RawMessage) {
 	case "user":
 		hub.SendPrivate(msg)
 	case "group":
+		if err := hub.authorizeGroupMessage(c.ctx, c.UserID, chatMsg.ToID); err != nil {
+			log.Printf("群消息权限校验失败: user_id=%d group_id=%d err=%v", c.UserID, chatMsg.ToID, err)
+			c.TrySend(newGroupAuthorizationErrorMessage(chatMsg.MsgID, err))
+			return
+		}
 		hub.SendGroup(msg)
 	default:
 		log.Printf("未知的接收类型: %s", chatMsg.ToType)

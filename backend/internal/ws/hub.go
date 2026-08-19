@@ -22,8 +22,9 @@ type registerRequest struct {
 // 使用 Channel 实现高效的消息路由，避免 map 遍历
 type Hub struct {
 	// ========== 数据库连接 ==========
-	db  *gorm.DB
-	rdb *redis.Client
+	db                    *gorm.DB
+	rdb                   *redis.Client
+	authorizeGroupMessage groupMessageAuthorizer
 
 	// ========== 注册/注销 Channel ==========
 	register   chan registerRequest // 客户端注册
@@ -52,18 +53,19 @@ func NewHub(db *gorm.DB, rdb *redis.Client) *Hub {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Hub{
-		db:         db,
-		rdb:        rdb,
-		register:   make(chan registerRequest, 256),
-		unregister: make(chan *Client, 256),
-		broadcast:  make(chan *Message, 1024),
-		private:    make(chan *Message, 1024),
-		group:      make(chan *Message, 1024),
-		clients:    make(map[uint]*Client),
-		groups:     make(map[uint]map[uint]*Client),
-		ctx:        ctx,
-		cancel:     cancel,
-		done:       make(chan struct{}),
+		db:                    db,
+		rdb:                   rdb,
+		authorizeGroupMessage: newGroupMessageAuthorizer(db),
+		register:              make(chan registerRequest, 256),
+		unregister:            make(chan *Client, 256),
+		broadcast:             make(chan *Message, 1024),
+		private:               make(chan *Message, 1024),
+		group:                 make(chan *Message, 1024),
+		clients:               make(map[uint]*Client),
+		groups:                make(map[uint]map[uint]*Client),
+		ctx:                   ctx,
+		cancel:                cancel,
+		done:                  make(chan struct{}),
 	}
 }
 
