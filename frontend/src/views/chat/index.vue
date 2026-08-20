@@ -486,6 +486,24 @@ function handleMessageScroll() {
   }
 }
 
+async function recoverMissedMessages() {
+  const active = chatStore.currentChat
+  const activeKey = active && chatStore.chatKey(active.type, active.id)
+  const shouldFollowLatest = isNearLatest()
+  const { addedByKey } = await chatStore.syncLoadedHistories()
+  const current = chatStore.currentChat
+  if (!activeKey || !current || chatStore.chatKey(current.type, current.id) !== activeKey) return
+
+  const added = addedByKey[activeKey] || 0
+  if (added === 0) return
+  if (shouldFollowLatest) {
+    scrollToBottom()
+  } else {
+    unseenCurrentMessages.value += added
+    showJumpToLatest.value = true
+  }
+}
+
 function isSelf(message) {
   return message.from_id === userStore.userInfo?.id || message.from_user_id === userStore.userInfo?.id
 }
@@ -795,8 +813,8 @@ onMounted(async () => {
     unsubscribeCallbacks = [
       subscribe('message', (message) => {
         const shouldFollowLatest = isNearLatest()
-        const key = chatStore.addMessage(message)
-        if (key === (chatStore.currentChat && chatStore.chatKey(chatStore.currentChat.type, chatStore.currentChat.id))) {
+        const { key, added } = chatStore.addMessage(message)
+        if (added && key === (chatStore.currentChat && chatStore.chatKey(chatStore.currentChat.type, chatStore.currentChat.id))) {
           if (shouldFollowLatest) {
             scrollToBottom()
           } else {
@@ -807,6 +825,7 @@ onMounted(async () => {
       }),
       subscribe('ack', (ack) => messageDelivery.acknowledge(ack)),
       subscribe('error', (error) => messageDelivery.reject(error)),
+      subscribe('reconnected', recoverMissedMessages),
       subscribe('onlineStatus', (status) => chatStore.setOnlineStatus(status.user_id, status.online)),
       subscribe('sessionReplaced', () => {
         sessionWasReplaced.value = true

@@ -85,6 +85,24 @@ describe('WebSocket reconnect lifecycle', () => {
     expect(FakeWebSocket.instances).toHaveLength(2)
   })
 
+  test('only a recovered connection emits the reconnected event', () => {
+    const onReconnected = vi.fn()
+    const unsubscribe = websocket.subscribe('reconnected', onReconnected)
+
+    websocket.connect('token')
+    const firstConnection = FakeWebSocket.instances[0]
+    firstConnection.open()
+    expect(onReconnected).not.toHaveBeenCalled()
+
+    firstConnection.serverClose(1006)
+    vi.advanceTimersByTime(1_000)
+    const secondConnection = FakeWebSocket.instances[1]
+    secondConnection.open()
+
+    expect(onReconnected).toHaveBeenCalledOnce()
+    unsubscribe()
+  })
+
   test('disconnect cancels a pending reconnect', () => {
     websocket.connect('token')
     const connection = FakeWebSocket.instances[0]

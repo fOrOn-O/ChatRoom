@@ -118,6 +118,82 @@ func TestActiveMemberCanReadGroupHistory(t *testing.T) {
 	}
 }
 
+func TestPrivateHistoryAfterIDReturnsOnlyNewMessagesInAscendingOrder(t *testing.T) {
+	db, mock := newMessageHandlerTestDB(t)
+	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `messages` WHERE .*to_type = 'user'.*AND id > \\?").
+		WithArgs(uint(7), uint64(8), uint64(8), uint(7), uint64(41)).
+		WillReturnRows(sqlmock.NewRows([]string{"count(*)"}).AddRow(2))
+	mock.ExpectQuery("SELECT \\* FROM `messages` WHERE .*to_type = 'user'.*AND id > \\? ORDER BY id ASC LIMIT \\?").
+		WithArgs(uint(7), uint64(8), uint64(8), uint(7), uint64(41), defaultHistoryPageSize).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "msg_id", "from_user_id", "to_id", "to_type", "content_type", "content", "extra", "created_at",
+		}).
+			AddRow(42, "message-42", 8, 7, "user", "text", "first", "{}", time.Now()).
+			AddRow(43, "message-43", 7, 8, "user", "text", "second", "{}", time.Now()))
+
+	response := performHistoryRequest(
+		t,
+		NewMessageHandler(db, nil),
+		7,
+		"/messages?target_id=8&target_type=user&after_id=41",
+	)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+
+	var body struct {
+		Data struct {
+			NextCursor string `json:"next_cursor"`
+			HasMore    bool   `json:"has_more"`
+			List       []struct {
+				MsgID string `json:"msg_id"`
+			} `json:"list"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if body.Data.NextCursor != "43" || body.Data.HasMore {
+		t.Fatalf("cursor = %q, has_more = %t; body = %s", body.Data.NextCursor, body.Data.HasMore, response.Body.String())
+	}
+	if len(body.Data.List) != 2 || body.Data.List[0].MsgID != "message-42" || body.Data.List[1].MsgID != "message-43" {
+		t.Fatalf("unexpected message order: %s", response.Body.String())
+	}
+}
+
+func TestIncrementalHistoryReportsMoreMessages(t *testing.T) {
+	db, mock := newMessageHandlerTestDB(t)
+	mock.ExpectQuery("SELECT count\\(\\*\\) FROM `messages` WHERE .*to_type = 'user'.*AND id > \\?").
+		WithArgs(uint(7), uint64(8), uint64(8), uint(7), uint64(41)).
+		WillReturnRows(sqlmock.NewRows([]string{"count(*)"}).AddRow(2))
+	mock.ExpectQuery("SELECT \\* FROM `messages` WHERE .*to_type = 'user'.*AND id > \\? ORDER BY id ASC LIMIT \\?").
+		WithArgs(uint(7), uint64(8), uint64(8), uint(7), uint64(41), 1).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "msg_id", "from_user_id", "to_id", "to_type", "content_type", "content", "extra", "created_at",
+		}).AddRow(42, "message-42", 8, 7, "user", "text", "first", "{}", time.Now()))
+
+	response := performHistoryRequest(
+		t,
+		NewMessageHandler(db, nil),
+		7,
+		"/messages?target_id=8&target_type=user&after_id=41&page_size=1",
+	)
+
+	var body struct {
+		Data struct {
+			NextCursor string `json:"next_cursor"`
+			HasMore    bool   `json:"has_more"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if response.Code != http.StatusOK || body.Data.NextCursor != "42" || !body.Data.HasMore {
+		t.Fatalf("unexpected response: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestNonMemberCannotReadGroupHistory(t *testing.T) {
 	db, mock := newMessageHandlerTestDB(t)
 	mock.ExpectQuery("SELECT .*group_status.*member_status.*FROM .*groups.*JOIN group_members.*").
@@ -170,6 +246,38 @@ func TestHistoryRejectsInvalidPagination(t *testing.T) {
 				t.Fatalf("unexpected response: status=%d code=%d body=%s", response.Code, bodyCode(t, response), response.Body.String())
 			}
 		})
+	}
+}
+
+func TestHistoryRejectsInvalidAfterID(t *testing.T) {
+	tests := []string{"", "abc", "-1", "18446744073709551616"}
+	for _, afterID := range tests {
+		t.Run("after_id="+afterID, func(t *testing.T) {
+			response := performHistoryRequest(
+				t,
+				NewMessageHandler(nil, nil),
+				7,
+				"/messages?target_id=8&target_type=user&after_id="+afterID,
+			)
+
+			if response.Code != http.StatusBadRequest || bodyCode(t, response) != 1001 {
+				t.Fatalf("unexpected response: status=%d code=%d body=%s", response.Code, bodyCode(t, response), response.Body.String())
+			}
+		})
+	}
+}
+
+func TestHistoryRejectsCursorCombinedWithLaterPage(t *testing.T) {
+	db, _ := newMessageHandlerTestDB(t)
+	response := performHistoryRequest(
+		t,
+		NewMessageHandler(db, nil),
+		7,
+		"/messages?target_id=8&target_type=user&after_id=41&page=2",
+	)
+
+	if response.Code != http.StatusBadRequest || bodyCode(t, response) != 1001 {
+		t.Fatalf("unexpected response: status=%d code=%d body=%s", response.Code, bodyCode(t, response), response.Body.String())
 	}
 }
 

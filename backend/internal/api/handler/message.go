@@ -59,6 +59,14 @@ func (h *MessageHandler) GetHistory(c *gin.Context) {
 	if !ok {
 		return
 	}
+	afterID, incremental, ok := parseHistoryCursor(c)
+	if !ok {
+		return
+	}
+	if incremental && page != defaultHistoryPage {
+		respondMessageBadRequest(c)
+		return
+	}
 
 	// 权限检查
 	if targetType == "group" {
@@ -90,6 +98,9 @@ func (h *MessageHandler) GetHistory(c *gin.Context) {
 			userID, targetID, targetID, userID,
 		)
 	}
+	if incremental {
+		query = query.Where("id > ?", afterID)
+	}
 
 	if err := query.Count(&total).Error; err != nil {
 		log.Printf("统计历史消息失败: target_id=%d target_type=%s err=%v", targetID, targetType, err)
@@ -97,10 +108,13 @@ func (h *MessageHandler) GetHistory(c *gin.Context) {
 		return
 	}
 
-	if err := query.Order("created_at DESC").
-		Offset((page - 1) * pageSize).
-		Limit(pageSize).
-		Find(&messages).Error; err != nil {
+	var listQuery *gorm.DB
+	if incremental {
+		listQuery = query.Order("id ASC").Limit(pageSize)
+	} else {
+		listQuery = query.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize)
+	}
+	if err := listQuery.Find(&messages).Error; err != nil {
 		log.Printf("查询历史消息失败: target_id=%d target_type=%s err=%v", targetID, targetType, err)
 		respondMessageInternalError(c)
 		return
@@ -108,7 +122,11 @@ func (h *MessageHandler) GetHistory(c *gin.Context) {
 
 	// 转换为响应格式
 	var result []gin.H
+	nextCursor := afterID
 	for _, msg := range messages {
+		if uint64(msg.ID) > nextCursor {
+			nextCursor = uint64(msg.ID)
+		}
 		result = append(result, gin.H{
 			"msg_id":       msg.MsgID,
 			"from_user_id": msg.FromUserID,
@@ -125,12 +143,28 @@ func (h *MessageHandler) GetHistory(c *gin.Context) {
 		"code":    0,
 		"message": "success",
 		"data": gin.H{
-			"total":     total,
-			"page":      page,
-			"page_size": pageSize,
-			"list":      result,
+			"total":       total,
+			"page":        page,
+			"page_size":   pageSize,
+			"list":        result,
+			"next_cursor": strconv.FormatUint(nextCursor, 10),
+			"has_more":    incremental && total > int64(len(messages)),
 		},
 	})
+}
+
+func parseHistoryCursor(c *gin.Context) (uint64, bool, bool) {
+	raw, exists := c.GetQuery("after_id")
+	if !exists {
+		return 0, false, true
+	}
+
+	afterID, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		respondMessageBadRequest(c)
+		return 0, false, false
+	}
+	return afterID, true, true
 }
 
 func parseHistoryPagination(c *gin.Context) (int, int, bool) {

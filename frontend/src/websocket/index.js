@@ -9,6 +9,7 @@ const callbacks = {
   onlineStatus: new Set(),
   ack: new Set(),
   error: new Set(),
+  reconnected: new Set(),
   sessionReplaced: new Set()
 }
 
@@ -16,6 +17,7 @@ let reconnectTimer = null
 let reconnectAttempts = 0
 let shouldReconnect = false
 let activeToken = ''
+let hasOpenedConnection = false
 
 function websocketUrl(token) {
   if (import.meta.env.VITE_WS_URL) {
@@ -52,8 +54,11 @@ export function connect(token) {
 
   ws.onopen = () => {
     if (socket.value !== ws) return
+    const recovered = hasOpenedConnection
+    hasOpenedConnection = true
     connected.value = true
     reconnectAttempts = 0
+    if (recovered) notify('reconnected')
   }
 
   ws.onmessage = (event) => {
@@ -92,6 +97,7 @@ export function connect(token) {
 export function disconnect() {
   shouldReconnect = false
   activeToken = ''
+  hasOpenedConnection = false
   if (reconnectTimer) window.clearTimeout(reconnectTimer)
   reconnectTimer = null
   reconnectAttempts = 0
