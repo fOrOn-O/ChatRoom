@@ -97,7 +97,7 @@ func TestNonMemberCannotSendGroupMessage(t *testing.T) {
 }
 
 func TestAuthorizedMemberCanSendGroupMessage(t *testing.T) {
-	hub := NewHub(nil, nil)
+	hub := newHubWithSuccessfulPersistence(t)
 	hub.authorizeGroupMessage = func(context.Context, uint, uint) error {
 		return nil
 	}

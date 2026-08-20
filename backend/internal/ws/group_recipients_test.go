@@ -14,7 +14,7 @@ func TestRemovedOnlineMemberDoesNotReceiveGroupMessage(t *testing.T) {
 		removedMemberID = uint(8)
 	)
 
-	hub := NewHub(nil, nil)
+	hub := newHubWithSuccessfulPersistence(t)
 	hub.resolveGroupRecipients = func(context.Context, uint) ([]uint, error) {
 		return []uint{senderID}, nil
 	}
@@ -46,7 +46,7 @@ func TestNewlyInvitedOnlineMemberReceivesGroupMessageWithoutReconnect(t *testing
 		invitedMemberID = uint(9)
 	)
 
-	hub := NewHub(nil, nil)
+	hub := newHubWithSuccessfulPersistence(t)
 	hub.resolveGroupRecipients = func(context.Context, uint) ([]uint, error) {
 		return []uint{senderID, invitedMemberID}, nil
 	}

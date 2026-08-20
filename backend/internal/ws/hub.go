@@ -184,7 +184,11 @@ func (h *Hub) disconnectClient(client *Client, code int, reason string) bool {
 // handlePrivateMessage 处理私聊消息
 func (h *Hub) handlePrivateMessage(msg *Message) {
 	// 保存消息到数据库
-	h.saveMessage(msg)
+	if err := h.saveMessage(h.ctx, msg); err != nil {
+		log.Printf("保存私聊消息失败: msg_id=%s err=%v", msg.MsgID, err)
+		h.sendToUser(msg.FromID, newMessagePersistenceErrorMessage(msg.MsgID))
+		return
+	}
 
 	h.mu.RLock()
 	target, ok := h.clients[msg.ToID]
@@ -194,23 +198,25 @@ func (h *Hub) handlePrivateMessage(msg *Message) {
 		if !target.TrySend(msg) {
 			h.disconnectClient(target, websocket.CloseTryAgainLater, "client too slow")
 		}
-
-		h.sendAck(msg.FromID, msg.MsgID, "sent")
-	} else {
-		// 用户离线，存储离线消息
-		h.storeOfflineMessage(msg)
 	}
+
+	// ACK 表示消息已经可靠写入历史记录，接收者离线时同样确认。
+	h.sendAck(msg.FromID, msg.MsgID, "sent")
 }
 
 // handleGroupMessage 处理群聊消息
 func (h *Hub) handleGroupMessage(msg *Message) {
-	// 保存消息到数据库
-	h.saveMessage(msg)
-
 	recipientIDs, err := h.resolveGroupRecipients(h.ctx, msg.ToID)
 	if err != nil {
 		log.Printf("查询群消息接收成员失败: group_id=%d err=%v", msg.ToID, err)
 		h.sendToUser(msg.FromID, newGroupRecipientResolutionErrorMessage(msg.MsgID))
+		return
+	}
+
+	// 接收成员解析成功后再保存，避免失败消息进入历史记录。
+	if err := h.saveMessage(h.ctx, msg); err != nil {
+		log.Printf("保存群聊消息失败: msg_id=%s err=%v", msg.MsgID, err)
+		h.sendToUser(msg.FromID, newMessagePersistenceErrorMessage(msg.MsgID))
 		return
 	}
 
@@ -327,25 +333,6 @@ func (h *Hub) sendAck(userID uint, msgID string, status string) {
 	})
 }
 
-// saveMessage 保存消息到数据库
-func (h *Hub) saveMessage(msg *Message) {
-	if h.db == nil {
-		return
-	}
-
-	// 直接执行SQL插入
-	h.db.Exec(
-		"INSERT INTO messages (msg_id, from_user_id, to_id, to_type, content_type, content, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
-		msg.MsgID, msg.FromID, msg.ToID, msg.ToType, msg.ContentType, msg.Content,
-	)
-}
-
-// storeOfflineMessage 存储离线消息
-func (h *Hub) storeOfflineMessage(msg *Message) {
-	// TODO: 实现离线消息存储到数据库
-	log.Printf("存储离线消息: from %d to %d", msg.FromID, msg.ToID)
-}
-
 // cleanup 清理资源
 func (h *Hub) cleanup() {
 	h.mu.Lock()
@@ -392,8 +379,7 @@ func (h *Hub) Register(client *Client) error {
 	}
 }
 
-// Unregister submits a client cleanup request without blocking forever after
-// the Hub has begun shutting down.
+// Unregister 提交客户端清理请求，并确保 Hub 开始关闭后不会永久阻塞。
 func (h *Hub) Unregister(client *Client) {
 	select {
 	case h.unregister <- client:
@@ -401,8 +387,7 @@ func (h *Hub) Unregister(client *Client) {
 	}
 }
 
-// Shutdown stops the Hub, closes all active WebSocket connections and waits
-// for cleanup to finish or for ctx to expire.
+// Shutdown 停止 Hub、关闭所有活跃的 WebSocket 连接，并等待清理完成或上下文超时。
 func (h *Hub) Shutdown(ctx context.Context) error {
 	h.cancel()
 	select {

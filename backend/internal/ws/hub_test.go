@@ -65,7 +65,7 @@ func TestSlowConsumerIsRemovedAndClosed(t *testing.T) {
 	for client.TrySend(&chatws.Message{Type: chatws.MsgTypeChat}) {
 	}
 
-	hub.SendPrivate(&chatws.Message{
+	hub.Broadcast(&chatws.Message{
 		Type:   chatws.MsgTypeChat,
 		FromID: 99,
 		ToID:   12,
@@ -147,7 +147,7 @@ func TestConcurrentConnectionChurnKeepsLatestClient(t *testing.T) {
 				errs <- err
 				return
 			}
-			hub.SendGroup(&chatws.Message{
+			hub.Broadcast(&chatws.Message{
 				Type:   chatws.MsgTypeChat,
 				FromID: 99,
 				ToID:   81,
@@ -240,12 +240,20 @@ func assertCloseCode(t *testing.T, conn *websocket.Conn, want int) {
 	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
 		t.Fatalf("set read deadline: %v", err)
 	}
-	_, _, err := conn.ReadMessage()
-	var closeErr *websocket.CloseError
-	if !errors.As(err, &closeErr) {
-		t.Fatalf("connection should receive a close frame, got %v", err)
-	}
-	if closeErr.Code != want {
-		t.Fatalf("close code = %d, want %d", closeErr.Code, want)
+	for {
+		_, _, err := conn.ReadMessage()
+		if err == nil {
+			// 注册期间可能已有在线状态帧排在关闭帧之前。
+			continue
+		}
+
+		var closeErr *websocket.CloseError
+		if !errors.As(err, &closeErr) {
+			t.Fatalf("connection should receive a close frame, got %v", err)
+		}
+		if closeErr.Code != want {
+			t.Fatalf("close code = %d, want %d", closeErr.Code, want)
+		}
+		return
 	}
 }
