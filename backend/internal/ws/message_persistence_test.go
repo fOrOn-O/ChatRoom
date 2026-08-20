@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"gorm.io/driver/mysql"
+	drivermysql "github.com/go-sql-driver/mysql"
+	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -171,6 +172,217 @@ func TestOnlinePrivateMessageDeliveredAfterPersistence(t *testing.T) {
 	assertMessageAck(t, response, "online-private-success", "sent")
 }
 
+func TestDuplicatePrivateMessageAcknowledgedWithoutRedelivery(t *testing.T) {
+	db, mock := newMessagePersistenceTestDB(t)
+	mock.ExpectExec("INSERT INTO messages").
+		WithArgs("duplicate-private", uint(7), uint(8), ToTypeUser, ContentTypeText, "already persisted").
+		WillReturnError(&drivermysql.MySQLError{Number: 1062, Message: "Duplicate entry"})
+	mock.ExpectQuery("SELECT from_user_id, to_id, to_type, content_type, content FROM messages WHERE msg_id = \\? LIMIT 1").
+		WithArgs("duplicate-private").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"from_user_id", "to_id", "to_type", "content_type", "content",
+		}).AddRow(uint(7), uint(8), ToTypeUser, ContentTypeText, "already persisted"))
+
+	hub := NewHub(db, nil)
+	startGroupRecipientHub(t, hub)
+
+	sender := NewClient(nil, 7, "sender", nil)
+	recipient := NewClient(nil, 8, "recipient", nil)
+	registerGroupRecipientClient(t, hub, sender)
+	registerGroupRecipientClient(t, hub, recipient)
+
+	hub.SendPrivate(&Message{
+		MsgID:       "duplicate-private",
+		Type:        MsgTypeChat,
+		FromID:      sender.UserID,
+		ToID:        recipient.UserID,
+		ToType:      ToTypeUser,
+		ContentType: ContentTypeText,
+		Content:     "already persisted",
+	})
+
+	response := waitForClientMessageType(t, sender, MsgTypeChatAck)
+	assertMessageAck(t, response, "duplicate-private", "sent")
+	assertClientReceivesNoChatMessage(t, recipient)
+	assertClientReceivesNoMessageType(t, sender, MsgTypeError)
+}
+
+func TestDuplicateGroupMessageAcknowledgedWithoutRedelivery(t *testing.T) {
+	db, mock := newMessagePersistenceTestDB(t)
+	mock.ExpectExec("INSERT INTO messages").
+		WithArgs("duplicate-group", uint(7), uint(42), ToTypeGroup, ContentTypeText, "already persisted").
+		WillReturnError(&drivermysql.MySQLError{Number: 1062, Message: "Duplicate entry"})
+	mock.ExpectQuery("SELECT from_user_id, to_id, to_type, content_type, content FROM messages WHERE msg_id = \\? LIMIT 1").
+		WithArgs("duplicate-group").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"from_user_id", "to_id", "to_type", "content_type", "content",
+		}).AddRow(uint(7), uint(42), ToTypeGroup, ContentTypeText, "already persisted"))
+
+	hub := NewHub(db, nil)
+	hub.resolveGroupRecipients = func(context.Context, uint) ([]uint, error) {
+		return []uint{7, 8}, nil
+	}
+	startGroupRecipientHub(t, hub)
+
+	sender := NewClient(nil, 7, "sender", []uint{42})
+	recipient := NewClient(nil, 8, "recipient", []uint{42})
+	registerGroupRecipientClient(t, hub, sender)
+	registerGroupRecipientClient(t, hub, recipient)
+
+	hub.SendGroup(&Message{
+		MsgID:       "duplicate-group",
+		Type:        MsgTypeChat,
+		FromID:      sender.UserID,
+		ToID:        42,
+		ToType:      ToTypeGroup,
+		ContentType: ContentTypeText,
+		Content:     "already persisted",
+	})
+
+	response := waitForClientMessageType(t, sender, MsgTypeChatAck)
+	assertMessageAck(t, response, "duplicate-group", "sent")
+	assertClientReceivesNoChatMessage(t, recipient)
+	assertClientReceivesNoMessageType(t, sender, MsgTypeError)
+}
+
+func TestMessageIDConflictWithDifferentContentIsRejected(t *testing.T) {
+	db, mock := newMessagePersistenceTestDB(t)
+	mock.ExpectExec("INSERT INTO messages").
+		WithArgs("content-conflict", uint(7), uint(8), ToTypeUser, ContentTypeText, "new content").
+		WillReturnError(&drivermysql.MySQLError{Number: 1062, Message: "Duplicate entry"})
+	mock.ExpectQuery("SELECT from_user_id, to_id, to_type, content_type, content FROM messages WHERE msg_id = \\? LIMIT 1").
+		WithArgs("content-conflict").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"from_user_id", "to_id", "to_type", "content_type", "content",
+		}).AddRow(uint(7), uint(8), ToTypeUser, ContentTypeText, "original content"))
+
+	hub := NewHub(db, nil)
+	startGroupRecipientHub(t, hub)
+
+	sender := NewClient(nil, 7, "sender", nil)
+	recipient := NewClient(nil, 8, "recipient", nil)
+	registerGroupRecipientClient(t, hub, sender)
+	registerGroupRecipientClient(t, hub, recipient)
+
+	hub.SendPrivate(&Message{
+		MsgID:       "content-conflict",
+		Type:        MsgTypeChat,
+		FromID:      sender.UserID,
+		ToID:        recipient.UserID,
+		ToType:      ToTypeUser,
+		ContentType: ContentTypeText,
+		Content:     "new content",
+	})
+
+	response := waitForClientMessageType(t, sender, MsgTypeError)
+	assertMessageErrorCode(t, response, "content-conflict", errorCodeInvalidMessage)
+	assertClientReceivesNoChatMessage(t, recipient)
+	assertClientReceivesNoMessageType(t, sender, MsgTypeChatAck)
+}
+
+func TestMessageIDConflictWithDifferentSenderIsRejected(t *testing.T) {
+	db, mock := newMessagePersistenceTestDB(t)
+	mock.ExpectExec("INSERT INTO messages").
+		WithArgs("sender-conflict", uint(7), uint(8), ToTypeUser, ContentTypeText, "same content").
+		WillReturnError(&drivermysql.MySQLError{Number: 1062, Message: "Duplicate entry"})
+	mock.ExpectQuery("SELECT from_user_id, to_id, to_type, content_type, content FROM messages WHERE msg_id = \\? LIMIT 1").
+		WithArgs("sender-conflict").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"from_user_id", "to_id", "to_type", "content_type", "content",
+		}).AddRow(uint(9), uint(8), ToTypeUser, ContentTypeText, "same content"))
+
+	hub := NewHub(db, nil)
+	startGroupRecipientHub(t, hub)
+
+	sender := NewClient(nil, 7, "sender", nil)
+	recipient := NewClient(nil, 8, "recipient", nil)
+	registerGroupRecipientClient(t, hub, sender)
+	registerGroupRecipientClient(t, hub, recipient)
+
+	hub.SendPrivate(&Message{
+		MsgID:       "sender-conflict",
+		Type:        MsgTypeChat,
+		FromID:      sender.UserID,
+		ToID:        recipient.UserID,
+		ToType:      ToTypeUser,
+		ContentType: ContentTypeText,
+		Content:     "same content",
+	})
+
+	response := waitForClientMessageType(t, sender, MsgTypeError)
+	assertMessageErrorCode(t, response, "sender-conflict", errorCodeInvalidMessage)
+	assertClientReceivesNoChatMessage(t, recipient)
+	assertClientReceivesNoMessageType(t, sender, MsgTypeChatAck)
+}
+
+func TestMessageIDConflictWithDifferentTargetIsRejected(t *testing.T) {
+	db, mock := newMessagePersistenceTestDB(t)
+	mock.ExpectExec("INSERT INTO messages").
+		WithArgs("target-conflict", uint(7), uint(8), ToTypeUser, ContentTypeText, "same content").
+		WillReturnError(&drivermysql.MySQLError{Number: 1062, Message: "Duplicate entry"})
+	mock.ExpectQuery("SELECT from_user_id, to_id, to_type, content_type, content FROM messages WHERE msg_id = \\? LIMIT 1").
+		WithArgs("target-conflict").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"from_user_id", "to_id", "to_type", "content_type", "content",
+		}).AddRow(uint(7), uint(9), ToTypeUser, ContentTypeText, "same content"))
+
+	hub := NewHub(db, nil)
+	startGroupRecipientHub(t, hub)
+
+	sender := NewClient(nil, 7, "sender", nil)
+	recipient := NewClient(nil, 8, "recipient", nil)
+	registerGroupRecipientClient(t, hub, sender)
+	registerGroupRecipientClient(t, hub, recipient)
+
+	hub.SendPrivate(&Message{
+		MsgID:       "target-conflict",
+		Type:        MsgTypeChat,
+		FromID:      sender.UserID,
+		ToID:        recipient.UserID,
+		ToType:      ToTypeUser,
+		ContentType: ContentTypeText,
+		Content:     "same content",
+	})
+
+	response := waitForClientMessageType(t, sender, MsgTypeError)
+	assertMessageErrorCode(t, response, "target-conflict", errorCodeInvalidMessage)
+	assertClientReceivesNoChatMessage(t, recipient)
+	assertClientReceivesNoMessageType(t, sender, MsgTypeChatAck)
+}
+
+func TestDuplicateMessageLookupFailureDoesNotAcknowledgeOrDeliver(t *testing.T) {
+	db, mock := newMessagePersistenceTestDB(t)
+	mock.ExpectExec("INSERT INTO messages").
+		WithArgs("duplicate-lookup-failure", uint(7), uint(8), ToTypeUser, ContentTypeText, "unknown duplicate").
+		WillReturnError(&drivermysql.MySQLError{Number: 1062, Message: "Duplicate entry"})
+	mock.ExpectQuery("SELECT from_user_id, to_id, to_type, content_type, content FROM messages WHERE msg_id = \\? LIMIT 1").
+		WithArgs("duplicate-lookup-failure").
+		WillReturnError(errors.New("database unavailable"))
+
+	hub := NewHub(db, nil)
+	startGroupRecipientHub(t, hub)
+
+	sender := NewClient(nil, 7, "sender", nil)
+	recipient := NewClient(nil, 8, "recipient", nil)
+	registerGroupRecipientClient(t, hub, sender)
+	registerGroupRecipientClient(t, hub, recipient)
+
+	hub.SendPrivate(&Message{
+		MsgID:       "duplicate-lookup-failure",
+		Type:        MsgTypeChat,
+		FromID:      sender.UserID,
+		ToID:        recipient.UserID,
+		ToType:      ToTypeUser,
+		ContentType: ContentTypeText,
+		Content:     "unknown duplicate",
+	})
+
+	response := waitForClientMessageType(t, sender, MsgTypeError)
+	assertInternalMessageError(t, response, "duplicate-lookup-failure")
+	assertClientReceivesNoChatMessage(t, recipient)
+	assertClientReceivesNoMessageType(t, sender, MsgTypeChatAck)
+}
+
 func newMessagePersistenceTestDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 	t.Helper()
 
@@ -189,7 +401,7 @@ func newMessagePersistenceTestDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 		}
 	})
 
-	db, err := gorm.Open(mysql.New(mysql.Config{
+	db, err := gorm.Open(gormmysql.New(gormmysql.Config{
 		Conn:                      sqlDB,
 		SkipInitializeWithVersion: true,
 	}), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
@@ -208,12 +420,17 @@ func newHubWithSuccessfulPersistence(t *testing.T) *Hub {
 
 func assertInternalMessageError(t *testing.T, message *Message, msgID string) {
 	t.Helper()
+	assertMessageErrorCode(t, message, msgID, errorCodeInternal)
+}
+
+func assertMessageErrorCode(t *testing.T, message *Message, msgID string, code int) {
+	t.Helper()
 
 	data, ok := message.Data.(map[string]interface{})
 	if !ok {
 		t.Fatalf("error data type = %T, want map[string]interface{}", message.Data)
 	}
-	if data["code"] != errorCodeInternal || data["msg_id"] != msgID {
+	if data["code"] != code || data["msg_id"] != msgID {
 		t.Fatalf("unexpected error data: %#v", data)
 	}
 }

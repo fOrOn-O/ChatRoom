@@ -189,9 +189,14 @@ func (h *Hub) disconnectClient(client *Client, code int, reason string) bool {
 // handlePrivateMessage 处理私聊消息
 func (h *Hub) handlePrivateMessage(msg *Message) {
 	// 保存消息到数据库
-	if err := h.saveMessage(h.ctx, msg); err != nil {
+	persistenceResult, err := h.saveMessage(h.ctx, msg)
+	if err != nil {
 		log.Printf("保存私聊消息失败: msg_id=%s err=%v", msg.MsgID, err)
-		h.sendToUser(msg.FromID, newMessagePersistenceErrorMessage(msg.MsgID))
+		h.sendToUser(msg.FromID, newMessagePersistenceErrorMessage(msg.MsgID, err))
+		return
+	}
+	if persistenceResult == messagePersistenceDuplicate {
+		h.sendAck(msg.FromID, msg.MsgID, "sent")
 		return
 	}
 
@@ -219,9 +224,14 @@ func (h *Hub) handleGroupMessage(msg *Message) {
 	}
 
 	// 接收成员解析成功后再保存，避免失败消息进入历史记录。
-	if err := h.saveMessage(h.ctx, msg); err != nil {
+	persistenceResult, err := h.saveMessage(h.ctx, msg)
+	if err != nil {
 		log.Printf("保存群聊消息失败: msg_id=%s err=%v", msg.MsgID, err)
-		h.sendToUser(msg.FromID, newMessagePersistenceErrorMessage(msg.MsgID))
+		h.sendToUser(msg.FromID, newMessagePersistenceErrorMessage(msg.MsgID, err))
+		return
+	}
+	if persistenceResult == messagePersistenceDuplicate {
+		h.sendAck(msg.FromID, msg.MsgID, "sent")
 		return
 	}
 
