@@ -20,8 +20,7 @@ const (
 	maxMessageSize = 4096 // 最大消息大小
 	sendBufferSize = 256  // 发送缓冲区大小
 
-	// CloseCodeConnectionReplaced indicates that a newer connection for the
-	// same account has taken ownership of the session.
+	// CloseCodeConnectionReplaced 表示同一账号的新连接已经接管当前会话。
 	CloseCodeConnectionReplaced = 4001
 )
 
@@ -201,14 +200,20 @@ func (c *Client) handleChatMessage(hub *Hub, data json.RawMessage) {
 
 	switch chatMsg.ToType {
 	case "user":
-		hub.SendPrivate(msg)
+		if err := hub.SendPrivate(msg); err != nil {
+			log.Printf("私聊消息进入处理队列失败: msg_id=%s err=%v", msg.MsgID, err)
+			c.TrySend(newMessageEnqueueErrorMessage(msg.MsgID))
+		}
 	case "group":
 		if err := hub.authorizeGroupMessage(c.ctx, c.UserID, chatMsg.ToID); err != nil {
 			log.Printf("群消息权限校验失败: user_id=%d group_id=%d err=%v", c.UserID, chatMsg.ToID, err)
 			c.TrySend(newGroupAuthorizationErrorMessage(chatMsg.MsgID, err))
 			return
 		}
-		hub.SendGroup(msg)
+		if err := hub.SendGroup(msg); err != nil {
+			log.Printf("群聊消息进入处理队列失败: msg_id=%s err=%v", msg.MsgID, err)
+			c.TrySend(newMessageEnqueueErrorMessage(msg.MsgID))
+		}
 	default:
 		log.Printf("未知的接收类型: %s", chatMsg.ToType)
 	}
@@ -219,8 +224,7 @@ func (c *Client) SendMessage(msg *Message) bool {
 	return c.TrySend(msg)
 }
 
-// TrySend queues a message only while the client is active and the outbound
-// buffer has capacity.
+// TrySend 仅在客户端仍处于活动状态且发送缓冲区有容量时将消息入队。
 func (c *Client) TrySend(msg *Message) bool {
 	select {
 	case <-c.ctx.Done():
@@ -243,8 +247,7 @@ func (c *Client) Close() {
 	c.CloseWithReason(websocket.CloseNormalClosure, "")
 }
 
-// CloseWithReason closes the client exactly once and, when possible, tells the
-// peer why the connection is being closed.
+// CloseWithReason 仅关闭客户端一次，并在条件允许时向对端发送关闭原因。
 func (c *Client) CloseWithReason(code int, reason string) {
 	c.closeOnce.Do(func() {
 		if c.Conn != nil {

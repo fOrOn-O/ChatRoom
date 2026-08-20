@@ -11,7 +11,12 @@ import (
 	"gorm.io/gorm"
 )
 
-var ErrHubClosed = errors.New("websocket hub is closed")
+var (
+	// ErrHubClosed 表示 Hub 已进入关闭状态，不再接受新事件。
+	ErrHubClosed = errors.New("websocket hub is closed")
+	// ErrHubQueueFull 表示消息队列已满，本次消息未被接受。
+	ErrHubQueueFull = errors.New("websocket hub message queue is full")
+)
 
 type registerRequest struct {
 	client *Client
@@ -269,29 +274,35 @@ func (h *Hub) handleBroadcastMessage(msg *Message) {
 }
 
 // SendPrivate 发送私聊消息
-func (h *Hub) SendPrivate(msg *Message) {
-	select {
-	case h.private <- msg:
-	default:
-		log.Printf("private channel full, dropping message from %d to %d", msg.FromID, msg.ToID)
-	}
+func (h *Hub) SendPrivate(msg *Message) error {
+	return h.enqueueMessage(h.private, msg)
 }
 
 // SendGroup 发送群聊消息
-func (h *Hub) SendGroup(msg *Message) {
-	select {
-	case h.group <- msg:
-	default:
-		log.Printf("group channel full, dropping message from %d to group %d", msg.FromID, msg.ToID)
-	}
+func (h *Hub) SendGroup(msg *Message) error {
+	return h.enqueueMessage(h.group, msg)
 }
 
 // Broadcast 广播消息
-func (h *Hub) Broadcast(msg *Message) {
+func (h *Hub) Broadcast(msg *Message) error {
+	return h.enqueueMessage(h.broadcast, msg)
+}
+
+// enqueueMessage 将消息非阻塞地放入指定队列，并返回明确的失败原因。
+func (h *Hub) enqueueMessage(queue chan<- *Message, msg *Message) error {
 	select {
-	case h.broadcast <- msg:
+	case <-h.ctx.Done():
+		return ErrHubClosed
 	default:
-		log.Printf("broadcast channel full, dropping message")
+	}
+
+	select {
+	case queue <- msg:
+		return nil
+	case <-h.ctx.Done():
+		return ErrHubClosed
+	default:
+		return ErrHubQueueFull
 	}
 }
 
