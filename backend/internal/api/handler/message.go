@@ -11,7 +11,6 @@ import (
 	"ChatRoom/internal/model"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -31,16 +30,12 @@ const (
 
 // MessageHandler 消息处理器
 type MessageHandler struct {
-	db  *gorm.DB
-	rdb *redis.Client
+	db *gorm.DB
 }
 
 // NewMessageHandler 创建消息处理器
-func NewMessageHandler(db *gorm.DB, rdb *redis.Client) *MessageHandler {
-	return &MessageHandler{
-		db:  db,
-		rdb: rdb,
-	}
+func NewMessageHandler(db *gorm.DB) *MessageHandler {
+	return &MessageHandler{db: db}
 }
 
 // GetHistory 获取历史消息

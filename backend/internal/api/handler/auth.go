@@ -7,7 +7,6 @@ import (
 	"ChatRoom/pkg/auth"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
@@ -15,15 +14,13 @@ import (
 // AuthHandler 认证处理器
 type AuthHandler struct {
 	db     *gorm.DB
-	rdb    *redis.Client
 	secret string
 }
 
 // NewAuthHandler 创建认证处理器
-func NewAuthHandler(db *gorm.DB, rdb *redis.Client, secret string) *AuthHandler {
+func NewAuthHandler(db *gorm.DB, secret string) *AuthHandler {
 	return &AuthHandler{
 		db:     db,
-		rdb:    rdb,
 		secret: secret,
 	}
 }

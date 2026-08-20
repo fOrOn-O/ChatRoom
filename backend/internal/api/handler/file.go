@@ -14,22 +14,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 // FileHandler 文件处理器
 type FileHandler struct {
-	db  *gorm.DB
-	rdb *redis.Client
+	db *gorm.DB
 }
 
 // NewFileHandler 创建文件处理器
-func NewFileHandler(db *gorm.DB, rdb *redis.Client) *FileHandler {
-	return &FileHandler{
-		db:  db,
-		rdb: rdb,
-	}
+func NewFileHandler(db *gorm.DB) *FileHandler {
+	return &FileHandler{db: db}
 }
 
 // Upload 上传文件
@@ -103,11 +98,11 @@ func (h *FileHandler) Upload(c *gin.Context) {
 
 	// 修复 #9: 文件类型验证
 	allowedTypes := map[string]bool{
-		"jpg":  true, "jpeg": true, "png": true, "gif": true, "webp": true,
-		"mp4":  true, "webm": true,
-		"pdf":  true, "doc": true, "docx": true, "txt": true,
-		"zip":  true, "rar": true,
-		"bin":  true, // 无扩展名文件
+		"jpg": true, "jpeg": true, "png": true, "gif": true, "webp": true,
+		"mp4": true, "webm": true,
+		"pdf": true, "doc": true, "docx": true, "txt": true,
+		"zip": true, "rar": true,
+		"bin": true, // 无扩展名文件
 	}
 	if !allowedTypes[fileType] {
 		c.JSON(http.StatusBadRequest, gin.H{

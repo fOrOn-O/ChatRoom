@@ -47,7 +47,7 @@ func main() {
 	go hub.Run()
 
 	// 6. 初始化路由
-	router := api.NewRouter(hub, db, rdb, cfg.JWT.Secret)
+	router := api.NewRouter(hub, db, cfg.JWT.Secret)
 
 	// 7. 创建 HTTP Server
 	server := &http.Server{

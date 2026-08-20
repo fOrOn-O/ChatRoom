@@ -23,7 +23,7 @@ func TestExitedMemberCannotReadGroupHistory(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"group_status", "member_status"}).
 			AddRow(model.GroupStatusActive, model.GroupMemberStatusInactive))
 
-	response := performHistoryRequest(t, NewMessageHandler(db, nil), 7, "/messages?target_id=42&target_type=group")
+	response := performHistoryRequest(t, NewMessageHandler(db), 7, "/messages?target_id=42&target_type=group")
 
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusForbidden, response.Body.String())
@@ -40,7 +40,7 @@ func TestGroupHistoryCountFailureReturnsInternalError(t *testing.T) {
 		WithArgs(uint64(42), "group").
 		WillReturnError(errors.New("database unavailable"))
 
-	response := performHistoryRequest(t, NewMessageHandler(db, nil), 7, "/messages?target_id=42&target_type=group")
+	response := performHistoryRequest(t, NewMessageHandler(db), 7, "/messages?target_id=42&target_type=group")
 
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusInternalServerError, response.Body.String())
@@ -60,7 +60,7 @@ func TestGroupHistoryListFailureReturnsInternalError(t *testing.T) {
 		WithArgs(uint64(42), "group", 20).
 		WillReturnError(errors.New("database unavailable"))
 
-	response := performHistoryRequest(t, NewMessageHandler(db, nil), 7, "/messages?target_id=42&target_type=group")
+	response := performHistoryRequest(t, NewMessageHandler(db), 7, "/messages?target_id=42&target_type=group")
 
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusInternalServerError, response.Body.String())
@@ -76,7 +76,7 @@ func TestDissolvedGroupCannotReadHistory(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"group_status", "member_status"}).
 			AddRow(model.GroupStatusDissolved, model.GroupMemberStatusActive))
 
-	response := performHistoryRequest(t, NewMessageHandler(db, nil), 7, "/messages?target_id=42&target_type=group")
+	response := performHistoryRequest(t, NewMessageHandler(db), 7, "/messages?target_id=42&target_type=group")
 
 	if response.Code != http.StatusForbidden || bodyCode(t, response) != 1003 {
 		t.Fatalf("unexpected response: status=%d code=%d body=%s", response.Code, bodyCode(t, response), response.Body.String())
@@ -95,7 +95,7 @@ func TestActiveMemberCanReadGroupHistory(t *testing.T) {
 			"id", "msg_id", "from_user_id", "to_id", "to_type", "content_type", "content", "extra", "created_at",
 		}).AddRow(1, "message-id", 7, 42, "group", "text", "hello", "{}", time.Now()))
 
-	response := performHistoryRequest(t, NewMessageHandler(db, nil), 7, "/messages?target_id=42&target_type=group")
+	response := performHistoryRequest(t, NewMessageHandler(db), 7, "/messages?target_id=42&target_type=group")
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
@@ -133,7 +133,7 @@ func TestPrivateHistoryAfterIDReturnsOnlyNewMessagesInAscendingOrder(t *testing.
 
 	response := performHistoryRequest(
 		t,
-		NewMessageHandler(db, nil),
+		NewMessageHandler(db),
 		7,
 		"/messages?target_id=8&target_type=user&after_id=41",
 	)
@@ -175,7 +175,7 @@ func TestIncrementalHistoryReportsMoreMessages(t *testing.T) {
 
 	response := performHistoryRequest(
 		t,
-		NewMessageHandler(db, nil),
+		NewMessageHandler(db),
 		7,
 		"/messages?target_id=8&target_type=user&after_id=41&page_size=1",
 	)
@@ -199,7 +199,7 @@ func TestNonMemberCannotReadGroupHistory(t *testing.T) {
 	mock.ExpectQuery("SELECT .*group_status.*member_status.*FROM .*groups.*JOIN group_members.*").
 		WillReturnRows(sqlmock.NewRows([]string{"group_status", "member_status"}))
 
-	response := performHistoryRequest(t, NewMessageHandler(db, nil), 7, "/messages?target_id=42&target_type=group")
+	response := performHistoryRequest(t, NewMessageHandler(db), 7, "/messages?target_id=42&target_type=group")
 
 	if response.Code != http.StatusForbidden || bodyCode(t, response) != 1003 {
 		t.Fatalf("unexpected response: status=%d code=%d body=%s", response.Code, bodyCode(t, response), response.Body.String())
@@ -211,7 +211,7 @@ func TestGroupHistoryAuthorizationFailureReturnsInternalError(t *testing.T) {
 	mock.ExpectQuery("SELECT .*group_status.*member_status.*FROM .*groups.*JOIN group_members.*").
 		WillReturnError(errors.New("database unavailable"))
 
-	response := performHistoryRequest(t, NewMessageHandler(db, nil), 7, "/messages?target_id=42&target_type=group")
+	response := performHistoryRequest(t, NewMessageHandler(db), 7, "/messages?target_id=42&target_type=group")
 
 	if response.Code != http.StatusInternalServerError || bodyCode(t, response) != 1005 {
 		t.Fatalf("unexpected response: status=%d code=%d body=%s", response.Code, bodyCode(t, response), response.Body.String())
@@ -237,7 +237,7 @@ func TestHistoryRejectsInvalidPagination(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			response := performHistoryRequest(
 				t,
-				NewMessageHandler(nil, nil),
+				NewMessageHandler(nil),
 				7,
 				"/messages?target_id=8&target_type=user&"+test.query,
 			)
@@ -255,7 +255,7 @@ func TestHistoryRejectsInvalidAfterID(t *testing.T) {
 		t.Run("after_id="+afterID, func(t *testing.T) {
 			response := performHistoryRequest(
 				t,
-				NewMessageHandler(nil, nil),
+				NewMessageHandler(nil),
 				7,
 				"/messages?target_id=8&target_type=user&after_id="+afterID,
 			)
@@ -271,7 +271,7 @@ func TestHistoryRejectsCursorCombinedWithLaterPage(t *testing.T) {
 	db, _ := newMessageHandlerTestDB(t)
 	response := performHistoryRequest(
 		t,
-		NewMessageHandler(db, nil),
+		NewMessageHandler(db),
 		7,
 		"/messages?target_id=8&target_type=user&after_id=41&page=2",
 	)
@@ -296,7 +296,7 @@ func TestHistoryRejectsInvalidTarget(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			response := performHistoryRequest(t, NewMessageHandler(nil, nil), 7, "/messages?"+test.query)
+			response := performHistoryRequest(t, NewMessageHandler(nil), 7, "/messages?"+test.query)
 
 			if response.Code != http.StatusBadRequest || bodyCode(t, response) != 1001 {
 				t.Fatalf("unexpected response: status=%d code=%d body=%s", response.Code, bodyCode(t, response), response.Body.String())
@@ -317,7 +317,7 @@ func TestHistoryAcceptsMaximumPagination(t *testing.T) {
 
 	response := performHistoryRequest(
 		t,
-		NewMessageHandler(db, nil),
+		NewMessageHandler(db),
 		7,
 		"/messages?target_id=8&target_type=user&page=10000&page_size=100",
 	)

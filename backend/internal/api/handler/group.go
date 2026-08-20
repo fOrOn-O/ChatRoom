@@ -11,7 +11,6 @@ import (
 	"ChatRoom/internal/model"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -35,16 +34,12 @@ type groupAccess struct {
 
 // GroupHandler 群组处理器
 type GroupHandler struct {
-	db  *gorm.DB
-	rdb *redis.Client
+	db *gorm.DB
 }
 
 // NewGroupHandler 创建群组处理器
-func NewGroupHandler(db *gorm.DB, rdb *redis.Client) *GroupHandler {
-	return &GroupHandler{
-		db:  db,
-		rdb: rdb,
-	}
+func NewGroupHandler(db *gorm.DB) *GroupHandler {
+	return &GroupHandler{db: db}
 }
 
 // CreateGroupRequest 创建群组请求

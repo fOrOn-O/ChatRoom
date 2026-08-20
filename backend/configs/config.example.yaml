@@ -19,6 +19,21 @@ redis:
   port: 6379
   password: ""
   db: 0
+  # 同一套 Redis 被多个环境或应用共用时，请为每个实例设置不同前缀。
+  key_prefix: chatroom
+  dial_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
+  # 当前阶段仅预留 Streams 参数，消息仍由 WebSocket Hub 处理。
+  stream:
+    # 留空时会根据 key_prefix 生成；只有需要兼容既有键名时才显式填写。
+    # chat_key: custom:stream:chat
+    # dead_key: custom:stream:chat:dead
+    # group: custom-message-workers
+    batch_size: 32
+    block_timeout: 1s
+    claim_idle: 30s
+    max_length: 100000
 
 jwt:
   # 使用安全随机值，例如 openssl rand -hex 32。

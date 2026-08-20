@@ -8,22 +8,17 @@ import (
 	"ChatRoom/internal/model"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 // FriendHandler 好友处理器
 type FriendHandler struct {
-	db  *gorm.DB
-	rdb *redis.Client
+	db *gorm.DB
 }
 
 // NewFriendHandler 创建好友处理器
-func NewFriendHandler(db *gorm.DB, rdb *redis.Client) *FriendHandler {
-	return &FriendHandler{
-		db:  db,
-		rdb: rdb,
-	}
+func NewFriendHandler(db *gorm.DB) *FriendHandler {
+	return &FriendHandler{db: db}
 }
 
 // SendRequestRequest 发送好友请求

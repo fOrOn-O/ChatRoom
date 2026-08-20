@@ -7,22 +7,17 @@ import (
 	"ChatRoom/internal/model"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 // UserHandler 用户处理器
 type UserHandler struct {
-	db  *gorm.DB
-	rdb *redis.Client
+	db *gorm.DB
 }
 
 // NewUserHandler 创建用户处理器
-func NewUserHandler(db *gorm.DB, rdb *redis.Client) *UserHandler {
-	return &UserHandler{
-		db:  db,
-		rdb: rdb,
-	}
+func NewUserHandler(db *gorm.DB) *UserHandler {
+	return &UserHandler{db: db}
 }
 
 // GetProfile 获取用户信息
@@ -42,13 +37,13 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 		"code":    0,
 		"message": "success",
 		"data": gin.H{
-			"id":        user.ID,
-			"username":  user.Username,
-			"nickname":  user.Nickname,
-			"avatar":    user.Avatar,
-			"email":     user.Email,
-			"phone":     user.Phone,
-			"signature": user.Signature,
+			"id":         user.ID,
+			"username":   user.Username,
+			"nickname":   user.Nickname,
+			"avatar":     user.Avatar,
+			"email":      user.Email,
+			"phone":      user.Phone,
+			"signature":  user.Signature,
 			"created_at": user.CreatedAt,
 		},
 	})

@@ -8,7 +8,6 @@ import (
 	"ChatRoom/internal/ws"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -17,17 +16,15 @@ type Router struct {
 	engine *gin.Engine
 	hub    *ws.Hub
 	db     *gorm.DB
-	rdb    *redis.Client
 	secret string
 }
 
 // NewRouter 创建新的路由
-func NewRouter(hub *ws.Hub, db *gorm.DB, rdb *redis.Client, jwtSecret string) *gin.Engine {
+func NewRouter(hub *ws.Hub, db *gorm.DB, jwtSecret string) *gin.Engine {
 	r := &Router{
 		engine: gin.Default(),
 		hub:    hub,
 		db:     db,
-		rdb:    rdb,
 		secret: jwtSecret,
 	}
 
@@ -64,7 +61,7 @@ func (r *Router) setupRoutes() {
 		// 认证相关（不需要登录）
 		auth := v1.Group("/auth")
 		{
-			authHandler := handler.NewAuthHandler(r.db, r.rdb, r.secret)
+			authHandler := handler.NewAuthHandler(r.db, r.secret)
 			auth.POST("/register", authHandler.Register)
 			auth.POST("/login", authHandler.Login)
 		}
@@ -74,7 +71,7 @@ func (r *Router) setupRoutes() {
 		authorized.Use(middleware.Auth(r.secret))
 		{
 			// 用户相关
-			userHandler := handler.NewUserHandler(r.db, r.rdb)
+			userHandler := handler.NewUserHandler(r.db)
 			user := authorized.Group("/user")
 			{
 				user.GET("/profile", userHandler.GetProfile)
@@ -83,7 +80,7 @@ func (r *Router) setupRoutes() {
 			authorized.GET("/users/search", userHandler.SearchUsers)
 
 			// 好友相关
-			friendHandler := handler.NewFriendHandler(r.db, r.rdb)
+			friendHandler := handler.NewFriendHandler(r.db)
 			friend := authorized.Group("/friends")
 			{
 				friend.GET("", friendHandler.GetFriends)
@@ -93,7 +90,7 @@ func (r *Router) setupRoutes() {
 			}
 
 			// 群组相关
-			groupHandler := handler.NewGroupHandler(r.db, r.rdb)
+			groupHandler := handler.NewGroupHandler(r.db)
 			group := authorized.Group("/groups")
 			{
 				group.GET("", groupHandler.GetGroups)
@@ -106,14 +103,14 @@ func (r *Router) setupRoutes() {
 			}
 
 			// 消息相关
-			messageHandler := handler.NewMessageHandler(r.db, r.rdb)
+			messageHandler := handler.NewMessageHandler(r.db)
 			message := authorized.Group("/messages")
 			{
 				message.GET("", messageHandler.GetHistory)
 			}
 
 			// 文件相关
-			fileHandler := handler.NewFileHandler(r.db, r.rdb)
+			fileHandler := handler.NewFileHandler(r.db)
 			file := authorized.Group("/files")
 			{
 				file.POST("/upload", fileHandler.Upload)
