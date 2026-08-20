@@ -56,6 +56,7 @@ type RedisStreamConfig struct {
 	BatchSize    int64         `mapstructure:"batch_size"`
 	BlockTimeout time.Duration `mapstructure:"block_timeout"`
 	ClaimIdle    time.Duration `mapstructure:"claim_idle"`
+	MaxRetries   int64         `mapstructure:"max_retries"`
 	MaxLength    int64         `mapstructure:"max_length"`
 }
 
@@ -146,6 +147,9 @@ func setDefaults(config *Config) {
 	}
 	if config.Redis.Stream.ClaimIdle <= 0 {
 		config.Redis.Stream.ClaimIdle = 30 * time.Second
+	}
+	if config.Redis.Stream.MaxRetries <= 0 {
+		config.Redis.Stream.MaxRetries = 5
 	}
 	if config.Redis.Stream.MaxLength <= 0 {
 		config.Redis.Stream.MaxLength = 100000

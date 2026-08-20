@@ -33,6 +33,7 @@ redis:
     batch_size: 32
     block_timeout: 1s
     claim_idle: 30s
+    max_retries: 5
     max_length: 100000
 
 jwt:

@@ -49,6 +49,9 @@ func TestLoadAppliesRedisOperationalDefaults(t *testing.T) {
 	if cfg.Redis.Stream.ClaimIdle != 30*time.Second {
 		t.Fatalf("Pending 接管时间 = %v，期望 %v", cfg.Redis.Stream.ClaimIdle, 30*time.Second)
 	}
+	if cfg.Redis.Stream.MaxRetries != 5 {
+		t.Fatalf("最大重试次数 = %d，期望 %d", cfg.Redis.Stream.MaxRetries, 5)
+	}
 	if cfg.Redis.Stream.MaxLength != 100000 {
 		t.Fatalf("Stream 最大长度 = %d，期望 %d", cfg.Redis.Stream.MaxLength, 100000)
 	}
@@ -67,6 +70,7 @@ func TestLoadReplacesInvalidRedisOperationalValues(t *testing.T) {
     batch_size: -1
     block_timeout: -1s
     claim_idle: -1s
+    max_retries: -1
     max_length: -1
 `)
 	if err := os.WriteFile(path, content, 0o600); err != nil {
@@ -87,7 +91,7 @@ func TestLoadReplacesInvalidRedisOperationalValues(t *testing.T) {
 	if cfg.Redis.Stream.ChatKey != "team:stream:chat" || cfg.Redis.Stream.DeadKey != "team:stream:chat:dead" {
 		t.Fatalf("Stream 键未使用规范化前缀: chat=%q dead=%q", cfg.Redis.Stream.ChatKey, cfg.Redis.Stream.DeadKey)
 	}
-	if cfg.Redis.Stream.BatchSize != 32 || cfg.Redis.Stream.BlockTimeout != time.Second || cfg.Redis.Stream.ClaimIdle != 30*time.Second || cfg.Redis.Stream.MaxLength != 100000 {
+	if cfg.Redis.Stream.BatchSize != 32 || cfg.Redis.Stream.BlockTimeout != time.Second || cfg.Redis.Stream.ClaimIdle != 30*time.Second || cfg.Redis.Stream.MaxRetries != 5 || cfg.Redis.Stream.MaxLength != 100000 {
 		t.Fatalf("非法 Stream 参数未回落到默认值: %+v", cfg.Redis.Stream)
 	}
 }
@@ -108,6 +112,7 @@ func TestLoadPreservesExplicitRedisOperationalValues(t *testing.T) {
     batch_size: 64
     block_timeout: 2s
     claim_idle: 45s
+    max_retries: 8
     max_length: 200000
 `)
 	if err := os.WriteFile(path, content, 0o600); err != nil {
@@ -123,7 +128,7 @@ func TestLoadPreservesExplicitRedisOperationalValues(t *testing.T) {
 	if cfg.Redis.KeyPrefix != "im" || cfg.Redis.DialTimeout != 8*time.Second || cfg.Redis.ReadTimeout != 4*time.Second || cfg.Redis.WriteTimeout != 6*time.Second {
 		t.Fatalf("显式 Redis 配置被意外覆盖: %+v", cfg.Redis)
 	}
-	if stream.ChatKey != "custom:chat" || stream.DeadKey != "custom:dead" || stream.Group != "custom-workers" || stream.BatchSize != 64 || stream.BlockTimeout != 2*time.Second || stream.ClaimIdle != 45*time.Second || stream.MaxLength != 200000 {
+	if stream.ChatKey != "custom:chat" || stream.DeadKey != "custom:dead" || stream.Group != "custom-workers" || stream.BatchSize != 64 || stream.BlockTimeout != 2*time.Second || stream.ClaimIdle != 45*time.Second || stream.MaxRetries != 8 || stream.MaxLength != 200000 {
 		t.Fatalf("显式 Stream 配置被意外覆盖: %+v", stream)
 	}
 }
