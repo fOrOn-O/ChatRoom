@@ -188,16 +188,21 @@ func (h *Hub) disconnectClient(client *Client, code int, reason string) bool {
 
 // handlePrivateMessage 处理私聊消息
 func (h *Hub) handlePrivateMessage(msg *Message) {
+	if err := h.processPrivateMessage(h.ctx, msg); err != nil {
+		log.Printf("处理私聊消息失败: msg_id=%s err=%v", msg.MsgID, err)
+	}
+}
+
+func (h *Hub) processPrivateMessage(ctx context.Context, msg *Message) error {
 	// 保存消息到数据库
-	persistenceResult, err := h.saveMessage(h.ctx, msg)
+	persistenceResult, err := h.saveMessage(ctx, msg)
 	if err != nil {
-		log.Printf("保存私聊消息失败: msg_id=%s err=%v", msg.MsgID, err)
 		h.sendToUser(msg.FromID, newMessagePersistenceErrorMessage(msg.MsgID, err))
-		return
+		return err
 	}
 	if persistenceResult == messagePersistenceDuplicate {
 		h.sendAck(msg.FromID, msg.MsgID, "sent")
-		return
+		return nil
 	}
 
 	h.mu.RLock()
@@ -212,27 +217,32 @@ func (h *Hub) handlePrivateMessage(msg *Message) {
 
 	// ACK 表示消息已经可靠写入历史记录，接收者离线时同样确认。
 	h.sendAck(msg.FromID, msg.MsgID, "sent")
+	return nil
 }
 
 // handleGroupMessage 处理群聊消息
 func (h *Hub) handleGroupMessage(msg *Message) {
-	recipientIDs, err := h.resolveGroupRecipients(h.ctx, msg.ToID)
+	if err := h.processGroupMessage(h.ctx, msg); err != nil {
+		log.Printf("处理群聊消息失败: msg_id=%s err=%v", msg.MsgID, err)
+	}
+}
+
+func (h *Hub) processGroupMessage(ctx context.Context, msg *Message) error {
+	recipientIDs, err := h.resolveGroupRecipients(ctx, msg.ToID)
 	if err != nil {
-		log.Printf("查询群消息接收成员失败: group_id=%d err=%v", msg.ToID, err)
 		h.sendToUser(msg.FromID, newGroupRecipientResolutionErrorMessage(msg.MsgID))
-		return
+		return err
 	}
 
 	// 接收成员解析成功后再保存，避免失败消息进入历史记录。
-	persistenceResult, err := h.saveMessage(h.ctx, msg)
+	persistenceResult, err := h.saveMessage(ctx, msg)
 	if err != nil {
-		log.Printf("保存群聊消息失败: msg_id=%s err=%v", msg.MsgID, err)
 		h.sendToUser(msg.FromID, newMessagePersistenceErrorMessage(msg.MsgID, err))
-		return
+		return err
 	}
 	if persistenceResult == messagePersistenceDuplicate {
 		h.sendAck(msg.FromID, msg.MsgID, "sent")
-		return
+		return nil
 	}
 
 	h.mu.RLock()
@@ -255,6 +265,7 @@ func (h *Hub) handleGroupMessage(msg *Message) {
 
 	// 发送确认给发送者
 	h.sendAck(msg.FromID, msg.MsgID, "sent")
+	return nil
 }
 
 func (h *Hub) sendToUser(userID uint, msg *Message) {
