@@ -71,6 +71,16 @@ export const useChatStore = defineStore('chat', () => {
     return key
   }
 
+  function updateMessage(msgId, patch) {
+    for (const list of Object.values(chatMessages)) {
+      const message = list.find((item) => item.msg_id === msgId)
+      if (!message) continue
+      Object.assign(message, patch)
+      return message
+    }
+    return null
+  }
+
   function setOnlineStatus(userId, online) {
     onlineUsers[userId] = online
     const friend = friends.value.find((item) => item.id === userId)
@@ -89,7 +99,7 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     friends, groups, sessions, currentChat, chatMessages, unreadCounts, onlineUsers,
-    fetchFriends, fetchGroups, setCurrentChat, fetchHistory, addMessage,
+    fetchFriends, fetchGroups, setCurrentChat, fetchHistory, addMessage, updateMessage,
     setOnlineStatus, removeFriend, removeGroup, chatKey
   }
 })

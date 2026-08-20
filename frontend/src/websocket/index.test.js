@@ -29,6 +29,10 @@ class FakeWebSocket {
   }
 
   send() {}
+
+  receive(message) {
+    this.onmessage?.({ data: JSON.stringify(message) })
+  }
 }
 
 vi.stubGlobal('window', {
@@ -91,5 +95,26 @@ describe('WebSocket reconnect lifecycle', () => {
     vi.advanceTimersByTime(30_000)
 
     expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
+  test('error frames notify subscribers with the original message ID', () => {
+    const onError = vi.fn()
+    const unsubscribe = websocket.subscribe('error', onError)
+
+    websocket.connect('token')
+    const connection = FakeWebSocket.instances[0]
+    connection.open()
+    connection.receive({
+      type: 'error',
+      data: { code: 1005, message: '消息暂时无法处理', msg_id: 'message-1' }
+    })
+
+    expect(onError).toHaveBeenCalledWith({
+      code: 1005,
+      message: '消息暂时无法处理',
+      msg_id: 'message-1'
+    })
+
+    unsubscribe()
   })
 })

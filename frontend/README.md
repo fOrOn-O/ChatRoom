@@ -29,5 +29,8 @@ VITE_WS_URL=wss://example.com/ws
 ## 校验
 
 ~~~powershell
+npm run test
 npm run build
 ~~~
+
+聊天消息发送后会显示“发送中”，收到服务端 ACK 后变为“已发送”。服务端拒绝消息或 10 秒内没有返回 ACK 时，消息气泡会显示失败原因并提供重试入口。

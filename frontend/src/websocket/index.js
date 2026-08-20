@@ -8,6 +8,7 @@ const callbacks = {
   message: new Set(),
   onlineStatus: new Set(),
   ack: new Set(),
+  error: new Set(),
   sessionReplaced: new Set()
 }
 
@@ -61,6 +62,7 @@ export function connect(token) {
       if (message.type === 'chat') notify('message', message)
       if (message.type === 'online_status') notify('onlineStatus', message.data || message)
       if (message.type === 'chat_ack') notify('ack', message.data || message)
+      if (message.type === 'error') notify('error', message.data || message)
     } catch {
       // 无法解析的帧不应中断当前连接。
     }

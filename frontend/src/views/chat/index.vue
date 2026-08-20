@@ -154,7 +154,16 @@
                       <template v-else-if="message.content_type === 'file'"><a :href="assetUrl(message.content)" class="file-message" target="_blank" rel="noopener" :download="fileName(message)" @click.prevent="downloadAttachment(message)"><el-icon><Document /></el-icon><span><strong>{{ fileName(message) }}</strong><small>点击下载文件</small></span><el-icon><Download /></el-icon></a></template>
                       <template v-else>{{ message.content }}</template>
                     </div>
-                    <div v-if="isMessageGroupEnd(index)" class="message-meta"><time :datetime="isoTime(message.timestamp)">{{ fullTime(message.timestamp) }}</time><span v-if="isSelf(message) && message.local_status === 'sending'">发送中</span><span v-else-if="isSelf(message) && message.local_status === 'failed'" class="failed">未发送</span><span v-else-if="isSelf(message)">已发送</span></div>
+                    <div v-if="shouldShowMessageMeta(message, index)" class="message-meta">
+                      <time :datetime="isoTime(message.timestamp)">{{ fullTime(message.timestamp) }}</time>
+                      <span v-if="isSelf(message) && message.local_status === 'sending'" class="delivery-status sending">发送中</span>
+                      <span v-else-if="isSelf(message) && message.local_status === 'failed'" class="delivery-status failed">发送失败</span>
+                      <span v-else-if="isSelf(message)" class="delivery-status sent">已发送</span>
+                    </div>
+                    <div v-if="isSelf(message) && message.local_status === 'failed'" class="message-failure" role="status">
+                      <span>{{ message.local_error_message || '消息未发送' }}</span>
+                      <button type="button" class="retry-message" :aria-label="`重新发送：${message.local_error_message || '消息发送失败'}`" @click="retryMessage(message)">重试</button>
+                    </div>
                   </div>
                   <el-avatar v-if="isSelf(message) && isMessageGroupStart(index)" :size="32" :src="assetUrl(userStore.userInfo?.avatar)">{{ initial(userStore.userInfo?.nickname) }}</el-avatar>
                   <span v-else-if="isSelf(message)" class="avatar-spacer" aria-hidden="true"></span>
@@ -237,7 +246,8 @@ import { updateProfile, searchUsers as searchUsersApi } from '../../api/user'
 import { deleteFriend, sendFriendRequest } from '../../api/friend'
 import { createGroup, getGroup, getGroupMembers, inviteMembers, leaveGroup, removeMember } from '../../api/group'
 import { downloadFile, resolveStoredFileUrl, uploadFile } from '../../api/message'
-import { connected, connect, disconnect, sendChatMessage, subscribe } from '../../websocket'
+import { connected, connect, createMessageId, disconnect, sendChatMessage, subscribe } from '../../websocket'
+import { createMessageDeliveryController } from '../../websocket/messageDelivery'
 import { CHAT_THEMES, readStoredChatTheme, writeStoredChatTheme } from '../../theme'
 import {
   canGroupMessages,
@@ -290,6 +300,11 @@ const savingProfile = ref(false)
 const profileForm = reactive({ username: '', nickname: '', avatar: '', signature: '', email: '', phone: '' })
 let composerResizeFrame
 let unsubscribeCallbacks = []
+const messageDelivery = createMessageDeliveryController({
+  send: sendChatMessage,
+  createId: createMessageId,
+  updateMessage: chatStore.updateMessage
+})
 
 const sectionTitle = computed(() => ({ chats: '最近会话', contacts: '联系人', groups: '我的群组' })[activeSection.value])
 const sectionSearchPlaceholder = computed(() => ({ chats: '搜索会话…', contacts: '搜索联系人…', groups: '搜索群组…' })[activeSection.value])
@@ -403,6 +418,10 @@ function isMessageGroupEnd(index) {
   return !canGroupMessages(currentMessages.value[index], currentMessages.value[index + 1], userStore.userInfo?.id)
 }
 
+function shouldShowMessageMeta(message, index) {
+  return isMessageGroupEnd(index) || (isSelf(message) && ['sending', 'failed'].includes(message.local_status))
+}
+
 function showDateDivider(index) {
   return shouldShowDateDivider(currentMessages.value, index)
 }
@@ -474,13 +493,14 @@ function isSelf(message) {
 function queueMessage(contentType, content) {
   const current = chatStore.currentChat
   if (!current) return false
-  const msgId = sendChatMessage({ toId: current.id, toType: current.type, contentType, content })
-  if (!msgId) {
+  const msgId = createMessageId()
+  const sentId = sendChatMessage({ msgId, toId: current.id, toType: current.type, contentType, content })
+  if (!sentId) {
     ElMessage.warning('实时连接尚未建立，请稍后重试')
     return false
   }
   chatStore.addMessage({
-    msg_id: msgId,
+    msg_id: sentId,
     from_id: userStore.userInfo.id,
     from_name: userStore.userInfo.nickname,
     to_id: current.id,
@@ -490,8 +510,13 @@ function queueMessage(contentType, content) {
     timestamp: Date.now(),
     local_status: 'sending'
   }, { incrementUnread: false })
+  messageDelivery.track(sentId)
   scrollToBottom()
   return true
+}
+
+function retryMessage(message) {
+  if (!messageDelivery.retry(message)) ElMessage.warning('实时连接尚未建立，请稍后重试')
 }
 
 function sendText() {
@@ -780,15 +805,12 @@ onMounted(async () => {
           }
         }
       }),
-      subscribe('ack', (ack) => {
-        Object.values(chatStore.chatMessages).forEach((list) => {
-          const message = list.find((item) => item.msg_id === ack.msg_id)
-          if (message) message.local_status = ack.status === 'sent' ? 'sent' : message.local_status
-        })
-      }),
+      subscribe('ack', (ack) => messageDelivery.acknowledge(ack)),
+      subscribe('error', (error) => messageDelivery.reject(error)),
       subscribe('onlineStatus', (status) => chatStore.setOnlineStatus(status.user_id, status.online)),
       subscribe('sessionReplaced', () => {
         sessionWasReplaced.value = true
+        messageDelivery.failPending('当前连接已被新会话替换，请重试')
         ElMessage.warning('当前连接已被新会话替换，已停止自动重连')
       })
     ]
@@ -802,6 +824,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   unsubscribeCallbacks.forEach((unsubscribe) => unsubscribe())
   window.cancelAnimationFrame(composerResizeFrame)
+  messageDelivery.dispose()
   disconnect()
   delete document.documentElement.dataset.chatTheme
 })
@@ -847,6 +870,8 @@ onBeforeUnmount(() => {
 .workspace[data-theme='glass'] {
   --line:rgba(255,255,255,.48);
   --muted:#687a73;
+  --delivery-danger:#a8404b;
+  --delivery-wait:#806027;
   background:
     radial-gradient(circle at 16% 14%,rgba(166,224,199,.78),transparent 30%),
     radial-gradient(circle at 88% 12%,rgba(192,207,246,.8),transparent 29%),
@@ -892,7 +917,7 @@ onBeforeUnmount(() => {
 .workspace[data-theme='glass'] .member-list::-webkit-scrollbar-thumb:hover { background:rgba(45,80,66,.58); background-clip:padding-box; }
 
 /* Neumorphism: one soft surface, with depth reserved for controls and bubbles. */
-.workspace[data-theme='neumorphic'] { --neu-surface:#e7ece7; --neu-dark:#c5ccc6; --neu-light:#fff; --line:transparent; --muted:#748178; background:var(--neu-surface); }
+.workspace[data-theme='neumorphic'] { --neu-surface:#e7ece7; --neu-dark:#c5ccc6; --neu-light:#fff; --line:transparent; --muted:#748178; --delivery-danger:#a24b50; --delivery-wait:#78612e; background:var(--neu-surface); }
 .workspace[data-theme='neumorphic'] .app-rail,
 .workspace[data-theme='neumorphic'] .conversation-pane,
 .workspace[data-theme='neumorphic'] .chat-stage,
@@ -959,7 +984,7 @@ onBeforeUnmount(() => {
 @media (max-width: 720px) { body { overflow:auto; }.workspace { grid-template-columns:54px minmax(0,1fr); }.conversation-pane { grid-column:2; }.app-rail { padding:12px 0; }.rail-nav { margin-top:27px; }.rail-nav button,.rail-bottom button { width:37px; height:37px; }.chat-stage { display:none; }.workspace:has(.chat-stage .chat-header) .conversation-pane { display:none; }.workspace:has(.chat-stage .chat-header) .chat-stage { display:flex; grid-column:2; }.chat-header { min-height:64px; padding:0 16px; }.mobile-back { display:grid; place-items:center; width:30px; height:30px; margin-right:6px; padding:0; border:0; border-radius:7px; color:#40684a; cursor:pointer; background:transparent; font-size:20px; }.messages { padding:20px 15px; }.composer { padding:10px 15px 13px; }.message-body { max-width:82%; }.composer-footer > span { display:none; }.inspector { width:min(286px, calc(100vw - 54px)); }.section-tabs { padding-bottom:12px; }.pane-head { min-height:67px; }.two-fields { grid-template-columns:1fr; gap:0; } }
 
 /* Web experience refinements */
-.workspace { height:100svh; }
+.workspace { --delivery-danger:#b54d52; --delivery-wait:#9a6a2d; height:100svh; }
 .chat-stage { position:relative; }
 .message-area { position:relative; min-height:0; flex:1; overflow:hidden; }
 .message-area .messages { width:100%; height:100%; }
@@ -981,6 +1006,15 @@ onBeforeUnmount(() => {
 .message-row.grouped { margin-top:7px; }
 .avatar-spacer { width:32px; height:1px; flex:0 0 32px; }
 .message-meta time,.row-top time { font-variant-numeric:tabular-nums; }
+.delivery-status { display:inline-flex; align-items:center; gap:4px; }
+.delivery-status.sending { color:var(--delivery-wait); }
+.delivery-status.sending::before { width:5px; height:5px; border-radius:50%; background:currentColor; content:''; animation:delivery-pulse 1.25s ease-in-out infinite; }
+.delivery-status.failed,.message-failure { color:var(--delivery-danger); }
+.message-failure { display:flex; align-items:center; justify-content:flex-end; gap:7px; margin:4px 3px 0; font-size:10px; line-height:1.4; }
+.message-failure span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.retry-message { flex:0 0 auto; padding:0; border:0; color:inherit; cursor:pointer; background:transparent; font:inherit; font-weight:800; }
+.retry-message:hover { text-decoration:underline; text-underline-offset:2px; }
+@keyframes delivery-pulse { 50% { opacity:.35; transform:scale(.72); } }
 .image-preview-button { display:block; max-width:100%; padding:0; overflow:hidden; border:0; border-radius:9px; cursor:zoom-in; background:transparent; }
 .image-message { width:auto; height:auto; }
 .jump-latest { position:absolute; z-index:12; right:clamp(22px,5vw,78px); bottom:18px; display:inline-flex; align-items:center; gap:6px; min-height:34px; padding:0 12px; border:1px solid #dce5da; border-radius:18px; color:#365d40; cursor:pointer; background:rgba(255,255,255,.94); box-shadow:0 8px 24px rgba(33,58,41,.12); font-size:10px; font-weight:800; animation:jump-latest-in .18s ease-out; }
@@ -997,6 +1031,7 @@ onBeforeUnmount(() => {
 .workspace[data-theme='neumorphic'] .connection-banner { color:#665b35; background:var(--neu-surface); box-shadow:inset 0 -1px rgba(177,188,179,.34); }
 .workspace[data-theme='neumorphic'] .jump-latest { border:0; background:var(--neu-surface); box-shadow:5px 5px 11px var(--neu-dark),-5px -5px 11px var(--neu-light); }
 .workspace[data-theme='neumorphic'] .message-row.grouped .bubble { box-shadow:2px 2px 6px rgba(180,190,182,.56),-2px -2px 6px rgba(255,255,255,.66); }
+.workspace[data-theme='neumorphic'] .retry-message { box-shadow:none; }
 @supports not ((backdrop-filter:blur(2px)) or (-webkit-backdrop-filter:blur(2px))) {
   .workspace[data-theme='glass'] .conversation-pane,
   .workspace[data-theme='glass'] .inspector,
