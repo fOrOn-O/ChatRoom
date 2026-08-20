@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"context"
+	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -10,6 +13,20 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+)
+
+var errGroupHistoryForbidden = errors.New("group history access forbidden")
+
+type groupHistoryAccess struct {
+	GroupStatus  int `gorm:"column:group_status"`
+	MemberStatus int `gorm:"column:member_status"`
+}
+
+const (
+	defaultHistoryPage     = 1
+	defaultHistoryPageSize = 20
+	maxHistoryPage         = 10_000
+	maxHistoryPageSize     = 100
 )
 
 // MessageHandler 消息处理器
@@ -30,24 +47,28 @@ func NewMessageHandler(db *gorm.DB, rdb *redis.Client) *MessageHandler {
 func (h *MessageHandler) GetHistory(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 
-	targetID, _ := strconv.ParseUint(c.Query("target_id"), 10, 32)
+	targetID, targetIDErr := strconv.ParseUint(c.Query("target_id"), 10, 32)
 	targetType := c.Query("target_type")
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
-	if targetID == 0 || targetType == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    1001,
-			"message": "参数错误",
-		})
+	if targetIDErr != nil || targetID == 0 || (targetType != "user" && targetType != "group") {
+		respondMessageBadRequest(c)
+		return
+	}
+
+	page, pageSize, ok := parseHistoryPagination(c)
+	if !ok {
 		return
 	}
 
 	// 权限检查
 	if targetType == "group" {
-		var count int64
-		h.db.Model(&model.GroupMember{}).Where("group_id = ? AND user_id = ?", targetID, userID).Count(&count)
-		if count == 0 {
+		if err := authorizeGroupHistory(c.Request.Context(), h.db, uint(targetID), userID); err != nil {
+			if !errors.Is(err, errGroupHistoryForbidden) {
+				log.Printf("查询群历史访问权限失败: group_id=%d user_id=%d err=%v", targetID, userID, err)
+				respondMessageInternalError(c)
+				return
+			}
+
 			c.JSON(http.StatusForbidden, gin.H{
 				"code":    1003,
 				"message": "无权限访问",
@@ -70,11 +91,20 @@ func (h *MessageHandler) GetHistory(c *gin.Context) {
 		)
 	}
 
-	query.Count(&total)
-	query.Order("created_at DESC").
+	if err := query.Count(&total).Error; err != nil {
+		log.Printf("统计历史消息失败: target_id=%d target_type=%s err=%v", targetID, targetType, err)
+		respondMessageInternalError(c)
+		return
+	}
+
+	if err := query.Order("created_at DESC").
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
-		Find(&messages)
+		Find(&messages).Error; err != nil {
+		log.Printf("查询历史消息失败: target_id=%d target_type=%s err=%v", targetID, targetType, err)
+		respondMessageInternalError(c)
+		return
+	}
 
 	// 转换为响应格式
 	var result []gin.H
@@ -101,4 +131,55 @@ func (h *MessageHandler) GetHistory(c *gin.Context) {
 			"list":      result,
 		},
 	})
+}
+
+func parseHistoryPagination(c *gin.Context) (int, int, bool) {
+	page, err := strconv.Atoi(c.DefaultQuery("page", strconv.Itoa(defaultHistoryPage)))
+	if err != nil || page < 1 || page > maxHistoryPage {
+		respondMessageBadRequest(c)
+		return 0, 0, false
+	}
+
+	pageSize, err := strconv.Atoi(c.DefaultQuery("page_size", strconv.Itoa(defaultHistoryPageSize)))
+	if err != nil || pageSize < 1 || pageSize > maxHistoryPageSize {
+		respondMessageBadRequest(c)
+		return 0, 0, false
+	}
+
+	return page, pageSize, true
+}
+
+func respondMessageBadRequest(c *gin.Context) {
+	c.JSON(http.StatusBadRequest, gin.H{
+		"code":    1001,
+		"message": "参数错误",
+	})
+}
+
+func respondMessageInternalError(c *gin.Context) {
+	c.JSON(http.StatusInternalServerError, gin.H{
+		"code":    1005,
+		"message": "服务器内部错误",
+	})
+}
+
+func authorizeGroupHistory(ctx context.Context, db *gorm.DB, groupID uint, userID uint) error {
+	var access groupHistoryAccess
+	err := db.WithContext(ctx).
+		Table("`groups` AS g").
+		Select("g.status AS group_status, gm.status AS member_status").
+		Joins("JOIN group_members AS gm ON gm.group_id = g.id AND gm.user_id = ?", userID).
+		Where("g.id = ? AND g.deleted_at IS NULL", groupID).
+		Take(&access).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return errGroupHistoryForbidden
+	}
+	if err != nil {
+		return err
+	}
+	if access.GroupStatus != model.GroupStatusActive || access.MemberStatus != model.GroupMemberStatusActive {
+		return errGroupHistoryForbidden
+	}
+
+	return nil
 }
