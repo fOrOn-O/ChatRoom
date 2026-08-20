@@ -101,6 +101,9 @@ func TestAuthorizedMemberCanSendGroupMessage(t *testing.T) {
 	hub.authorizeGroupMessage = func(context.Context, uint, uint) error {
 		return nil
 	}
+	hub.resolveGroupRecipients = func(context.Context, uint) ([]uint, error) {
+		return []uint{7}, nil
+	}
 	go hub.Run()
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)

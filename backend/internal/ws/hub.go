@@ -22,9 +22,10 @@ type registerRequest struct {
 // 使用 Channel 实现高效的消息路由，避免 map 遍历
 type Hub struct {
 	// ========== 数据库连接 ==========
-	db                    *gorm.DB
-	rdb                   *redis.Client
-	authorizeGroupMessage groupMessageAuthorizer
+	db                     *gorm.DB
+	rdb                    *redis.Client
+	authorizeGroupMessage  groupMessageAuthorizer
+	resolveGroupRecipients groupRecipientResolver
 
 	// ========== 注册/注销 Channel ==========
 	register   chan registerRequest // 客户端注册
@@ -53,19 +54,20 @@ func NewHub(db *gorm.DB, rdb *redis.Client) *Hub {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Hub{
-		db:                    db,
-		rdb:                   rdb,
-		authorizeGroupMessage: newGroupMessageAuthorizer(db),
-		register:              make(chan registerRequest, 256),
-		unregister:            make(chan *Client, 256),
-		broadcast:             make(chan *Message, 1024),
-		private:               make(chan *Message, 1024),
-		group:                 make(chan *Message, 1024),
-		clients:               make(map[uint]*Client),
-		groups:                make(map[uint]map[uint]*Client),
-		ctx:                   ctx,
-		cancel:                cancel,
-		done:                  make(chan struct{}),
+		db:                     db,
+		rdb:                    rdb,
+		authorizeGroupMessage:  newGroupMessageAuthorizer(db),
+		resolveGroupRecipients: newGroupRecipientResolver(db),
+		register:               make(chan registerRequest, 256),
+		unregister:             make(chan *Client, 256),
+		broadcast:              make(chan *Message, 1024),
+		private:                make(chan *Message, 1024),
+		group:                  make(chan *Message, 1024),
+		clients:                make(map[uint]*Client),
+		groups:                 make(map[uint]map[uint]*Client),
+		ctx:                    ctx,
+		cancel:                 cancel,
+		done:                   make(chan struct{}),
 	}
 }
 
@@ -205,14 +207,22 @@ func (h *Hub) handleGroupMessage(msg *Message) {
 	// 保存消息到数据库
 	h.saveMessage(msg)
 
+	recipientIDs, err := h.resolveGroupRecipients(h.ctx, msg.ToID)
+	if err != nil {
+		log.Printf("查询群消息接收成员失败: group_id=%d err=%v", msg.ToID, err)
+		h.sendToUser(msg.FromID, newGroupRecipientResolutionErrorMessage(msg.MsgID))
+		return
+	}
+
 	h.mu.RLock()
-	members := h.groups[msg.ToID]
-	recipients := make([]*Client, 0, len(members))
-	for userID, client := range members {
+	recipients := make([]*Client, 0, len(recipientIDs))
+	for _, userID := range recipientIDs {
 		if userID == msg.FromID {
 			continue
 		}
-		recipients = append(recipients, client)
+		if client, ok := h.clients[userID]; ok {
+			recipients = append(recipients, client)
+		}
 	}
 	h.mu.RUnlock()
 
@@ -224,6 +234,16 @@ func (h *Hub) handleGroupMessage(msg *Message) {
 
 	// 发送确认给发送者
 	h.sendAck(msg.FromID, msg.MsgID, "sent")
+}
+
+func (h *Hub) sendToUser(userID uint, msg *Message) {
+	h.mu.RLock()
+	client, ok := h.clients[userID]
+	h.mu.RUnlock()
+
+	if ok && !client.TrySend(msg) {
+		h.disconnectClient(client, websocket.CloseTryAgainLater, "client too slow")
+	}
 }
 
 // handleBroadcastMessage 处理广播消息
@@ -298,22 +318,13 @@ func (h *Hub) broadcastOnlineStatus(userID uint, online bool) {
 
 // sendAck 发送消息确认
 func (h *Hub) sendAck(userID uint, msgID string, status string) {
-	h.mu.RLock()
-	client, ok := h.clients[userID]
-	h.mu.RUnlock()
-
-	if ok {
-		ack := &Message{
-			Type: "chat_ack",
-			Data: map[string]interface{}{
-				"msg_id": msgID,
-				"status": status,
-			},
-		}
-		if !client.TrySend(ack) {
-			h.disconnectClient(client, websocket.CloseTryAgainLater, "client too slow")
-		}
-	}
+	h.sendToUser(userID, &Message{
+		Type: "chat_ack",
+		Data: map[string]interface{}{
+			"msg_id": msgID,
+			"status": status,
+		},
+	})
 }
 
 // saveMessage 保存消息到数据库
