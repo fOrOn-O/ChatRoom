@@ -57,6 +57,9 @@ func TestQueuedPrivatePersistenceFailureReturnsErrorWithoutDelivery(t *testing.T
 func TestQueuedGroupRecipientFailureReturnsErrorWithoutPersistence(t *testing.T) {
 	db, _ := newMessagePersistenceTestDB(t)
 	hub := NewHub(db, nil)
+	hub.authorizeGroupMessage = func(context.Context, uint, uint) error {
+		return nil
+	}
 	hub.resolveGroupRecipients = func(context.Context, uint) ([]uint, error) {
 		return nil, errGroupRecipientResolutionUnavailable
 	}
@@ -72,6 +75,37 @@ func TestQueuedGroupRecipientFailureReturnsErrorWithoutPersistence(t *testing.T)
 	assertInternalMessageError(t, response, queued.MsgID)
 	assertClientReceivesNoChatMessage(t, recipient)
 	assertClientReceivesNoMessageType(t, sender, MsgTypeChatAck)
+}
+
+func TestQueuedGroupMessageRejectsInactiveSenderBeforeProcessing(t *testing.T) {
+	db, _ := newMessagePersistenceTestDB(t)
+	hub := NewHub(db, nil)
+	authorizationCalls := 0
+	hub.authorizeGroupMessage = func(_ context.Context, userID uint, groupID uint) error {
+		authorizationCalls++
+		if userID != 7 || groupID != 42 {
+			t.Fatalf("权限校验参数 = user_id %d, group_id %d，期望 7 和 42", userID, groupID)
+		}
+		return errGroupMessageForbidden
+	}
+	hub.resolveGroupRecipients = func(context.Context, uint) ([]uint, error) {
+		t.Fatal("权限拒绝后不应解析群成员")
+		return nil, nil
+	}
+	startGroupRecipientHub(t, hub)
+	sender, recipient := registerQueuedMessageClients(t, hub, []uint{42})
+	queued := newQueuedChatMessage("queued-group-forbidden", 42, messagequeue.ToTypeGroup, "must stay pending")
+
+	err := hub.Handle(context.Background(), queued)
+	if !errors.Is(err, errGroupMessageForbidden) {
+		t.Fatalf("无权发送时 Handle() 错误 = %v，期望 errGroupMessageForbidden", err)
+	}
+	if authorizationCalls != 1 {
+		t.Fatalf("权限校验次数 = %d，期望 1", authorizationCalls)
+	}
+	assertClientReceivesNoChatMessage(t, recipient)
+	assertClientReceivesNoMessageType(t, sender, MsgTypeChatAck)
+	assertClientReceivesNoMessageType(t, sender, MsgTypeError)
 }
 
 func TestQueuedPrivateDuplicateAcknowledgesWithoutRedelivery(t *testing.T) {
@@ -115,6 +149,14 @@ func TestQueuedGroupMessageResolvesRecipientsPersistsAndDelivers(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	hub := NewHub(db, nil)
+	authorizationCalls := 0
+	hub.authorizeGroupMessage = func(_ context.Context, userID uint, groupID uint) error {
+		authorizationCalls++
+		if userID != 7 || groupID != 42 {
+			t.Fatalf("权限校验参数 = user_id %d, group_id %d，期望 7 和 42", userID, groupID)
+		}
+		return nil
+	}
 	hub.resolveGroupRecipients = func(context.Context, uint) ([]uint, error) {
 		return []uint{7, 8}, nil
 	}
@@ -124,6 +166,9 @@ func TestQueuedGroupMessageResolvesRecipientsPersistsAndDelivers(t *testing.T) {
 
 	if err := hub.Handle(context.Background(), queued); err != nil {
 		t.Fatalf("处理队列群聊消息失败: %v", err)
+	}
+	if authorizationCalls != 1 {
+		t.Fatalf("权限校验次数 = %d，期望 1", authorizationCalls)
 	}
 	received := waitForClientMessageType(t, recipient, MsgTypeChat)
 	if received.MsgID != queued.MsgID || received.ToType != ToTypeGroup {

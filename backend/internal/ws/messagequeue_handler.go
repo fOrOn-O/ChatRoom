@@ -27,6 +27,9 @@ func (h *Hub) Handle(ctx context.Context, queued messagequeue.ChatMessage) error
 	}
 
 	if message.ToType == ToTypeGroup {
+		if err := h.authorizeGroupMessage(ctx, message.FromID, message.ToID); err != nil {
+			return err
+		}
 		return h.processGroupMessage(ctx, message)
 	}
 	return h.processPrivateMessage(ctx, message)
