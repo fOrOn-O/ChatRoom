@@ -37,15 +37,16 @@ type DatabaseConfig struct {
 
 // RedisConfig Redis 配置
 type RedisConfig struct {
-	Host         string            `mapstructure:"host"`
-	Port         int               `mapstructure:"port"`
-	Password     string            `mapstructure:"password"`
-	DB           int               `mapstructure:"db"`
-	KeyPrefix    string            `mapstructure:"key_prefix"`
-	DialTimeout  time.Duration     `mapstructure:"dial_timeout"`
-	ReadTimeout  time.Duration     `mapstructure:"read_timeout"`
-	WriteTimeout time.Duration     `mapstructure:"write_timeout"`
-	Stream       RedisStreamConfig `mapstructure:"stream"`
+	Host         string               `mapstructure:"host"`
+	Port         int                  `mapstructure:"port"`
+	Password     string               `mapstructure:"password"`
+	DB           int                  `mapstructure:"db"`
+	KeyPrefix    string               `mapstructure:"key_prefix"`
+	DialTimeout  time.Duration        `mapstructure:"dial_timeout"`
+	ReadTimeout  time.Duration        `mapstructure:"read_timeout"`
+	WriteTimeout time.Duration        `mapstructure:"write_timeout"`
+	Stream       RedisStreamConfig    `mapstructure:"stream"`
+	RateLimit    RedisRateLimitConfig `mapstructure:"rate_limit"`
 }
 
 // RedisStreamConfig Redis Streams 配置
@@ -58,6 +59,18 @@ type RedisStreamConfig struct {
 	ClaimIdle    time.Duration `mapstructure:"claim_idle"`
 	MaxRetries   int64         `mapstructure:"max_retries"`
 	MaxLength    int64         `mapstructure:"max_length"`
+}
+
+// RedisRateLimitConfig Redis 限流配置
+type RedisRateLimitConfig struct {
+	Login LoginRateLimitConfig `mapstructure:"login"`
+}
+
+// LoginRateLimitConfig 登录限流配置
+type LoginRateLimitConfig struct {
+	IPLimit        int64         `mapstructure:"ip_limit"`
+	AccountIPLimit int64         `mapstructure:"account_ip_limit"`
+	Window         time.Duration `mapstructure:"window"`
 }
 
 // JWTConfig JWT 配置
@@ -153,6 +166,15 @@ func setDefaults(config *Config) {
 	}
 	if config.Redis.Stream.MaxLength <= 0 {
 		config.Redis.Stream.MaxLength = 100000
+	}
+	if config.Redis.RateLimit.Login.IPLimit <= 0 {
+		config.Redis.RateLimit.Login.IPLimit = 30
+	}
+	if config.Redis.RateLimit.Login.AccountIPLimit <= 0 {
+		config.Redis.RateLimit.Login.AccountIPLimit = 5
+	}
+	if config.Redis.RateLimit.Login.Window <= 0 {
+		config.Redis.RateLimit.Login.Window = time.Minute
 	}
 	if config.JWT.Expire == 0 {
 		config.JWT.Expire = 24 * time.Hour

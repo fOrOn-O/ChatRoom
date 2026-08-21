@@ -24,6 +24,12 @@ redis:
   dial_timeout: 5s
   read_timeout: 3s
   write_timeout: 3s
+  # 登录限流同时检查来源 IP 和账号与 IP 的组合，窗口内达到任一上限都会拒绝。
+  rate_limit:
+    login:
+      ip_limit: 30
+      account_ip_limit: 5
+      window: 1m
   # Streams 发布器和消费者随服务启动，WebSocket chat 消息经 Stream 持久化和投递。
   stream:
     # 留空时会根据 key_prefix 生成；只有需要兼容既有键名时才显式填写。

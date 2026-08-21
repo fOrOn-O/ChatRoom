@@ -55,6 +55,15 @@ func TestLoadAppliesRedisOperationalDefaults(t *testing.T) {
 	if cfg.Redis.Stream.MaxLength != 100000 {
 		t.Fatalf("Stream 最大长度 = %d，期望 %d", cfg.Redis.Stream.MaxLength, 100000)
 	}
+	if cfg.Redis.RateLimit.Login.IPLimit != 30 {
+		t.Fatalf("登录 IP 限制 = %d，期望 %d", cfg.Redis.RateLimit.Login.IPLimit, 30)
+	}
+	if cfg.Redis.RateLimit.Login.AccountIPLimit != 5 {
+		t.Fatalf("登录账号与 IP 组合限制 = %d，期望 %d", cfg.Redis.RateLimit.Login.AccountIPLimit, 5)
+	}
+	if cfg.Redis.RateLimit.Login.Window != time.Minute {
+		t.Fatalf("登录限流窗口 = %v，期望 %v", cfg.Redis.RateLimit.Login.Window, time.Minute)
+	}
 }
 
 func TestLoadReplacesInvalidRedisOperationalValues(t *testing.T) {
@@ -72,6 +81,11 @@ func TestLoadReplacesInvalidRedisOperationalValues(t *testing.T) {
     claim_idle: -1s
     max_retries: -1
     max_length: -1
+  rate_limit:
+    login:
+      ip_limit: -1
+      account_ip_limit: -1
+      window: -1s
 `)
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatalf("写入测试配置失败: %v", err)
@@ -94,6 +108,10 @@ func TestLoadReplacesInvalidRedisOperationalValues(t *testing.T) {
 	if cfg.Redis.Stream.BatchSize != 32 || cfg.Redis.Stream.BlockTimeout != time.Second || cfg.Redis.Stream.ClaimIdle != 30*time.Second || cfg.Redis.Stream.MaxRetries != 5 || cfg.Redis.Stream.MaxLength != 100000 {
 		t.Fatalf("非法 Stream 参数未回落到默认值: %+v", cfg.Redis.Stream)
 	}
+	loginLimit := cfg.Redis.RateLimit.Login
+	if loginLimit.IPLimit != 30 || loginLimit.AccountIPLimit != 5 || loginLimit.Window != time.Minute {
+		t.Fatalf("非法登录限流参数未回落到默认值: %+v", loginLimit)
+	}
 }
 
 func TestLoadPreservesExplicitRedisOperationalValues(t *testing.T) {
@@ -114,6 +132,11 @@ func TestLoadPreservesExplicitRedisOperationalValues(t *testing.T) {
     claim_idle: 45s
     max_retries: 8
     max_length: 200000
+  rate_limit:
+    login:
+      ip_limit: 60
+      account_ip_limit: 8
+      window: 2m
 `)
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatalf("写入测试配置失败: %v", err)
@@ -130,5 +153,9 @@ func TestLoadPreservesExplicitRedisOperationalValues(t *testing.T) {
 	}
 	if stream.ChatKey != "custom:chat" || stream.DeadKey != "custom:dead" || stream.Group != "custom-workers" || stream.BatchSize != 64 || stream.BlockTimeout != 2*time.Second || stream.ClaimIdle != 45*time.Second || stream.MaxRetries != 8 || stream.MaxLength != 200000 {
 		t.Fatalf("显式 Stream 配置被意外覆盖: %+v", stream)
+	}
+	loginLimit := cfg.Redis.RateLimit.Login
+	if loginLimit.IPLimit != 60 || loginLimit.AccountIPLimit != 8 || loginLimit.Window != 2*time.Minute {
+		t.Fatalf("显式登录限流配置被意外覆盖: %+v", loginLimit)
 	}
 }

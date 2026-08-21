@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"ChatRoom/internal/api"
+	"ChatRoom/internal/ratelimit"
 	"ChatRoom/internal/ws"
 	"ChatRoom/pkg/config"
 	"ChatRoom/pkg/database"
@@ -59,9 +60,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("初始化 Redis Streams 消息队列失败: %v", err)
 	}
+	loginLimiter, err := ratelimit.NewLoginLimiter(rdb, ratelimit.LoginOptions{
+		KeyPrefix:      cfg.Redis.KeyPrefix,
+		IPLimit:        cfg.Redis.RateLimit.Login.IPLimit,
+		AccountIPLimit: cfg.Redis.RateLimit.Login.AccountIPLimit,
+		Window:         cfg.Redis.RateLimit.Login.Window,
+	})
+	if err != nil {
+		log.Fatalf("初始化登录限流器失败: %v", err)
+	}
 
 	// 6. 初始化路由
-	router := api.NewRouter(hub, db, queueRuntime.Publisher(), cfg.JWT.Secret)
+	router := api.NewRouter(hub, db, queueRuntime.Publisher(), loginLimiter, cfg.JWT.Secret)
 
 	// 7. 创建 HTTP Server
 	server := &http.Server{

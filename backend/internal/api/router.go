@@ -6,6 +6,7 @@ import (
 	"ChatRoom/internal/api/handler"
 	"ChatRoom/internal/api/middleware"
 	"ChatRoom/internal/messagequeue"
+	"ChatRoom/internal/ratelimit"
 	"ChatRoom/internal/ws"
 
 	"github.com/gin-gonic/gin"
@@ -14,21 +15,23 @@ import (
 
 // Router 路由管理器
 type Router struct {
-	engine    *gin.Engine
-	hub       *ws.Hub
-	db        *gorm.DB
-	publisher messagequeue.Publisher
-	secret    string
+	engine       *gin.Engine
+	hub          *ws.Hub
+	db           *gorm.DB
+	publisher    messagequeue.Publisher
+	loginLimiter ratelimit.LoginLimiter
+	secret       string
 }
 
 // NewRouter 创建新的路由
-func NewRouter(hub *ws.Hub, db *gorm.DB, publisher messagequeue.Publisher, jwtSecret string) *gin.Engine {
+func NewRouter(hub *ws.Hub, db *gorm.DB, publisher messagequeue.Publisher, loginLimiter ratelimit.LoginLimiter, jwtSecret string) *gin.Engine {
 	r := &Router{
-		engine:    gin.Default(),
-		hub:       hub,
-		db:        db,
-		publisher: publisher,
-		secret:    jwtSecret,
+		engine:       gin.Default(),
+		hub:          hub,
+		db:           db,
+		publisher:    publisher,
+		loginLimiter: loginLimiter,
+		secret:       jwtSecret,
 	}
 
 	r.setupMiddleware()
@@ -64,7 +67,7 @@ func (r *Router) setupRoutes() {
 		// 认证相关（不需要登录）
 		auth := v1.Group("/auth")
 		{
-			authHandler := handler.NewAuthHandler(r.db, r.secret)
+			authHandler := handler.NewAuthHandler(r.db, r.secret, r.loginLimiter)
 			auth.POST("/register", authHandler.Register)
 			auth.POST("/login", authHandler.Login)
 		}

@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"log"
 	"net/http"
 
 	"ChatRoom/internal/model"
+	"ChatRoom/internal/ratelimit"
 	"ChatRoom/pkg/auth"
 
 	"github.com/gin-gonic/gin"
@@ -13,15 +15,17 @@ import (
 
 // AuthHandler 认证处理器
 type AuthHandler struct {
-	db     *gorm.DB
-	secret string
+	db           *gorm.DB
+	secret       string
+	loginLimiter ratelimit.LoginLimiter
 }
 
 // NewAuthHandler 创建认证处理器
-func NewAuthHandler(db *gorm.DB, secret string) *AuthHandler {
+func NewAuthHandler(db *gorm.DB, secret string, loginLimiter ratelimit.LoginLimiter) *AuthHandler {
 	return &AuthHandler{
-		db:     db,
-		secret: secret,
+		db:           db,
+		secret:       secret,
+		loginLimiter: loginLimiter,
 	}
 }
 
@@ -116,6 +120,20 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			"message": "参数错误: " + err.Error(),
 		})
 		return
+	}
+
+	if h.loginLimiter != nil {
+		allowed, err := h.loginLimiter.Allow(c.Request.Context(), c.RemoteIP(), req.Username)
+		if err != nil {
+			// 限流依赖异常时放行，避免 Redis 短暂故障阻断全部登录。
+			log.Printf("登录限流检查失败，已放行本次请求: %v", err)
+		} else if !allowed {
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"code":    2004,
+				"message": "登录尝试过于频繁，请稍后重试",
+			})
+			return
+		}
 	}
 
 	// 查找用户
