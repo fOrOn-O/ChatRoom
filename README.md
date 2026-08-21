@@ -148,7 +148,7 @@ npm run build
 
 仓库提供 backend/configs/config.example.yaml 作为配置模板。复制为 config.yaml 后，填写本地数据库和 Redis 连接信息即可开始开发。Redis 是后端启动依赖，服务启动时会在连接超时窗口内执行连通性检查，连接失败则终止启动。
 
-`redis.key_prefix` 用于隔离不同应用或环境的键空间；`dial_timeout`、`read_timeout` 和 `write_timeout` 控制 Redis 网络操作超时。`redis.stream` 已预留聊天消息流、死信流和消费者组参数，但当前阶段尚未启用 Redis Streams，实时消息仍由 WebSocket Hub 路由并直接持久化到 MySQL。
+`redis.key_prefix` 用于隔离不同应用或环境的键空间；`dial_timeout`、`read_timeout` 和 `write_timeout` 控制 Redis 网络操作超时。聊天消息由 WebSocket 入口发布到 `redis.stream`，消费者完成 MySQL 持久化、实时投递和 ACK；处理失败的消息会进入 Pending 恢复流程，超过重试上限后转入死信 Stream。
 
 ## 文档
 

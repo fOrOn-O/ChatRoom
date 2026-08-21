@@ -191,7 +191,7 @@ func startClient(t *testing.T, hub *chatws.Hub, client *chatws.Client) {
 		t.Fatalf("register client: %v", err)
 	}
 	go client.WritePump()
-	go client.ReadPump(hub)
+	go client.ReadPump(hub, nil)
 }
 
 func websocketPair(t *testing.T) (*websocket.Conn, *websocket.Conn) {

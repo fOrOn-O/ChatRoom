@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"ChatRoom/internal/api/middleware"
+	"ChatRoom/internal/messagequeue"
 	"ChatRoom/internal/model"
 	"ChatRoom/internal/ws"
 
@@ -23,7 +24,7 @@ var upgrader = websocket.Upgrader{
 }
 
 // HandleWebSocket 处理 WebSocket 连接
-func HandleWebSocket(c *gin.Context, hub *ws.Hub, db *gorm.DB) {
+func HandleWebSocket(c *gin.Context, hub *ws.Hub, db *gorm.DB, publisher messagequeue.Publisher) {
 	// 从中间件获取用户信息
 	userID := middleware.GetUserID(c)
 	username := middleware.GetUsername(c)
@@ -64,5 +65,5 @@ func HandleWebSocket(c *gin.Context, hub *ws.Hub, db *gorm.DB) {
 
 	// 启动读写 Goroutine
 	go client.WritePump()
-	go client.ReadPump(hub)
+	go client.ReadPump(hub, publisher)
 }

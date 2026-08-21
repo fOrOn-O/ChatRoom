@@ -7,14 +7,13 @@ import (
 	"time"
 )
 
-func TestPrivateQueueFullReturnsErrorToSender(t *testing.T) {
+func TestPrivatePublishFailureReturnsErrorToSender(t *testing.T) {
 	hub := NewHub(nil)
-	fillPrivateQueue(t, hub)
 
 	peer, server := websocketPairForAuthorization(t)
 	client := NewClient(server, 7, "alice", nil)
 	go client.WritePump()
-	go client.ReadPump(hub)
+	go client.ReadPump(hub, &recordingMessagePublisher{err: errors.New("Redis 暂时不可用")})
 
 	const msgID = "private-queue-full-feedback"
 	if err := peer.WriteJSON(map[string]any{
@@ -33,17 +32,16 @@ func TestPrivateQueueFullReturnsErrorToSender(t *testing.T) {
 	assertWebSocketInternalError(t, peer, msgID)
 }
 
-func TestGroupQueueFullReturnsErrorToSender(t *testing.T) {
+func TestGroupPublishFailureReturnsErrorToSender(t *testing.T) {
 	hub := NewHub(nil)
 	hub.authorizeGroupMessage = func(context.Context, uint, uint) error {
 		return nil
 	}
-	fillGroupQueue(t, hub)
 
 	peer, server := websocketPairForAuthorization(t)
 	client := NewClient(server, 7, "alice", []uint{42})
 	go client.WritePump()
-	go client.ReadPump(hub)
+	go client.ReadPump(hub, &recordingMessagePublisher{err: errors.New("Redis 暂时不可用")})
 
 	const msgID = "group-queue-full-feedback"
 	if err := peer.WriteJSON(map[string]any{
@@ -60,36 +58,6 @@ func TestGroupQueueFullReturnsErrorToSender(t *testing.T) {
 	}
 
 	assertWebSocketInternalError(t, peer, msgID)
-}
-
-func fillPrivateQueue(t *testing.T, hub *Hub) {
-	t.Helper()
-	message := &Message{Type: MsgTypeChat, FromID: 99, ToID: 100, ToType: ToTypeUser}
-	for attempt := 0; attempt < 10_000; attempt++ {
-		err := hub.SendPrivate(message)
-		if errors.Is(err, ErrHubQueueFull) {
-			return
-		}
-		if err != nil {
-			t.Fatalf("fill private queue: %v", err)
-		}
-	}
-	t.Fatal("private message queue did not report being full")
-}
-
-func fillGroupQueue(t *testing.T, hub *Hub) {
-	t.Helper()
-	message := &Message{Type: MsgTypeChat, FromID: 99, ToID: 42, ToType: ToTypeGroup}
-	for attempt := 0; attempt < 10_000; attempt++ {
-		err := hub.SendGroup(message)
-		if errors.Is(err, ErrHubQueueFull) {
-			return
-		}
-		if err != nil {
-			t.Fatalf("fill group queue: %v", err)
-		}
-	}
-	t.Fatal("group message queue did not report being full")
 }
 
 func assertWebSocketInternalError(t *testing.T, peer interface {

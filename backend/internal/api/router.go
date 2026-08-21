@@ -5,6 +5,7 @@ import (
 
 	"ChatRoom/internal/api/handler"
 	"ChatRoom/internal/api/middleware"
+	"ChatRoom/internal/messagequeue"
 	"ChatRoom/internal/ws"
 
 	"github.com/gin-gonic/gin"
@@ -13,19 +14,21 @@ import (
 
 // Router 路由管理器
 type Router struct {
-	engine *gin.Engine
-	hub    *ws.Hub
-	db     *gorm.DB
-	secret string
+	engine    *gin.Engine
+	hub       *ws.Hub
+	db        *gorm.DB
+	publisher messagequeue.Publisher
+	secret    string
 }
 
 // NewRouter 创建新的路由
-func NewRouter(hub *ws.Hub, db *gorm.DB, jwtSecret string) *gin.Engine {
+func NewRouter(hub *ws.Hub, db *gorm.DB, publisher messagequeue.Publisher, jwtSecret string) *gin.Engine {
 	r := &Router{
-		engine: gin.Default(),
-		hub:    hub,
-		db:     db,
-		secret: jwtSecret,
+		engine:    gin.Default(),
+		hub:       hub,
+		db:        db,
+		publisher: publisher,
+		secret:    jwtSecret,
 	}
 
 	r.setupMiddleware()
@@ -121,7 +124,7 @@ func (r *Router) setupRoutes() {
 
 	// WebSocket（需要登录）
 	r.engine.GET("/ws", middleware.Auth(r.secret), func(c *gin.Context) {
-		handler.HandleWebSocket(c, r.hub, r.db)
+		handler.HandleWebSocket(c, r.hub, r.db, r.publisher)
 	})
 
 	// 静态文件（前端）

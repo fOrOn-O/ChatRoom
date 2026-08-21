@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"ChatRoom/internal/messagequeue"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -66,7 +68,7 @@ func NewClient(conn *websocket.Conn, userID uint, username string, groupIDs []ui
 
 // ReadPump 从 WebSocket 连接读取消息
 // 运行在独立的 Goroutine 中
-func (c *Client) ReadPump(hub *Hub) {
+func (c *Client) ReadPump(hub *Hub, publisher messagequeue.Publisher) {
 	defer func() {
 		c.Close()
 		hub.Unregister(c)
@@ -100,7 +102,7 @@ func (c *Client) ReadPump(hub *Hub) {
 			}
 
 			// 处理接收到的消息
-			c.handleMessage(hub, message)
+			c.handleMessage(hub, publisher, message)
 		}
 	}
 }
@@ -152,7 +154,7 @@ func (c *Client) WritePump() {
 }
 
 // handleMessage 处理接收到的消息
-func (c *Client) handleMessage(hub *Hub, data []byte) {
+func (c *Client) handleMessage(hub *Hub, publisher messagequeue.Publisher, data []byte) {
 	var msg struct {
 		Type string          `json:"type"`
 		Data json.RawMessage `json:"data"`
@@ -165,14 +167,14 @@ func (c *Client) handleMessage(hub *Hub, data []byte) {
 
 	switch msg.Type {
 	case "chat":
-		c.handleChatMessage(hub, msg.Data)
+		c.handleChatMessage(hub, publisher, msg.Data)
 	default:
 		log.Printf("未知消息类型: %s", msg.Type)
 	}
 }
 
 // handleChatMessage 处理聊天消息
-func (c *Client) handleChatMessage(hub *Hub, data json.RawMessage) {
+func (c *Client) handleChatMessage(hub *Hub, publisher messagequeue.Publisher, data json.RawMessage) {
 	var chatMsg struct {
 		MsgID       string `json:"msg_id"`
 		ToID        uint   `json:"to_id"`
@@ -186,9 +188,9 @@ func (c *Client) handleChatMessage(hub *Hub, data json.RawMessage) {
 		return
 	}
 
-	msg := &Message{
+	queued := messagequeue.ChatMessage{
+		Version:     messagequeue.ChatMessageVersion,
 		MsgID:       chatMsg.MsgID,
-		Type:        "chat",
 		FromID:      c.UserID,
 		FromName:    c.Username,
 		ToID:        chatMsg.ToID,
@@ -198,24 +200,32 @@ func (c *Client) handleChatMessage(hub *Hub, data json.RawMessage) {
 		Timestamp:   time.Now().Unix(),
 	}
 
-	switch chatMsg.ToType {
-	case "user":
-		if err := hub.SendPrivate(msg); err != nil {
-			log.Printf("私聊消息进入处理队列失败: msg_id=%s err=%v", msg.MsgID, err)
-			c.TrySend(newMessageEnqueueErrorMessage(msg.MsgID))
-		}
-	case "group":
+	if chatMsg.ToType == ToTypeGroup {
 		if err := hub.authorizeGroupMessage(c.ctx, c.UserID, chatMsg.ToID); err != nil {
 			log.Printf("群消息权限校验失败: user_id=%d group_id=%d err=%v", c.UserID, chatMsg.ToID, err)
 			c.TrySend(newGroupAuthorizationErrorMessage(chatMsg.MsgID, err))
 			return
 		}
-		if err := hub.SendGroup(msg); err != nil {
-			log.Printf("群聊消息进入处理队列失败: msg_id=%s err=%v", msg.MsgID, err)
-			c.TrySend(newMessageEnqueueErrorMessage(msg.MsgID))
-		}
-	default:
-		log.Printf("未知的接收类型: %s", chatMsg.ToType)
+	}
+	if publisher == nil {
+		log.Printf("消息发布器不可用: msg_id=%s", queued.MsgID)
+		c.TrySend(newMessagePublishErrorMessage(queued.MsgID))
+		return
+	}
+	if err := publisher.Publish(c.ctx, queued); err != nil {
+		log.Printf("聊天消息发布失败: msg_id=%s err=%v", queued.MsgID, err)
+		c.TrySend(newMessagePublishErrorMessage(queued.MsgID))
+	}
+}
+
+func newMessagePublishErrorMessage(msgID string) *Message {
+	return &Message{
+		Type: MsgTypeError,
+		Data: map[string]interface{}{
+			"code":    errorCodeInternal,
+			"message": "消息暂时无法发布，请稍后重试",
+			"msg_id":  msgID,
+		},
 	}
 }
 
