@@ -19,7 +19,7 @@ func TestQueuedPrivateMessagePersistsDeliversAndAcknowledges(t *testing.T) {
 
 	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
-	sender, recipient := registerQueuedMessageClients(t, hub, nil)
+	sender, recipient := registerQueuedMessageClients(t, hub)
 	queued := newQueuedChatMessage("queued-private-success", recipient.UserID, messagequeue.ToTypeUser, "persisted before delivery")
 
 	if err := hub.Handle(context.Background(), queued); err != nil {
@@ -41,7 +41,7 @@ func TestQueuedPrivatePersistenceFailureReturnsErrorWithoutDelivery(t *testing.T
 
 	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
-	sender, recipient := registerQueuedMessageClients(t, hub, nil)
+	sender, recipient := registerQueuedMessageClients(t, hub)
 	queued := newQueuedChatMessage("queued-private-failure", recipient.UserID, messagequeue.ToTypeUser, "must stay pending")
 
 	err := hub.Handle(context.Background(), queued)
@@ -64,7 +64,7 @@ func TestQueuedGroupRecipientFailureReturnsErrorWithoutPersistence(t *testing.T)
 		return nil, errGroupRecipientResolutionUnavailable
 	}
 	startGroupRecipientHub(t, hub)
-	sender, recipient := registerQueuedMessageClients(t, hub, []uint{42})
+	sender, recipient := registerQueuedMessageClients(t, hub)
 	queued := newQueuedChatMessage("queued-group-recipient-failure", 42, messagequeue.ToTypeGroup, "must stay pending")
 
 	err := hub.Handle(context.Background(), queued)
@@ -93,7 +93,7 @@ func TestQueuedGroupMessageRejectsInactiveSenderBeforeProcessing(t *testing.T) {
 		return nil, nil
 	}
 	startGroupRecipientHub(t, hub)
-	sender, recipient := registerQueuedMessageClients(t, hub, []uint{42})
+	sender, recipient := registerQueuedMessageClients(t, hub)
 	queued := newQueuedChatMessage("queued-group-forbidden", 42, messagequeue.ToTypeGroup, "must stay pending")
 
 	err := hub.Handle(context.Background(), queued)
@@ -124,7 +124,7 @@ func TestQueuedPrivateDuplicateAcknowledgesWithoutRedelivery(t *testing.T) {
 
 	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
-	sender, recipient := registerQueuedMessageClients(t, hub, nil)
+	sender, recipient := registerQueuedMessageClients(t, hub)
 	queued := newQueuedChatMessage("queued-private-duplicate", recipient.UserID, messagequeue.ToTypeUser, "deliver only once")
 
 	if err := hub.Handle(context.Background(), queued); err != nil {
@@ -161,7 +161,7 @@ func TestQueuedGroupMessageResolvesRecipientsPersistsAndDelivers(t *testing.T) {
 		return []uint{7, 8}, nil
 	}
 	startGroupRecipientHub(t, hub)
-	sender, recipient := registerQueuedMessageClients(t, hub, []uint{42})
+	sender, recipient := registerQueuedMessageClients(t, hub)
 	queued := newQueuedChatMessage("queued-group-success", 42, messagequeue.ToTypeGroup, "current members only")
 
 	if err := hub.Handle(context.Background(), queued); err != nil {
@@ -177,10 +177,10 @@ func TestQueuedGroupMessageResolvesRecipientsPersistsAndDelivers(t *testing.T) {
 	assertMessageAck(t, waitForClientMessageType(t, sender, MsgTypeChatAck), queued.MsgID, "sent")
 }
 
-func registerQueuedMessageClients(t *testing.T, hub *Hub, groupIDs []uint) (*Client, *Client) {
+func registerQueuedMessageClients(t *testing.T, hub *Hub) (*Client, *Client) {
 	t.Helper()
-	sender := NewClient(nil, 7, "sender", groupIDs)
-	recipient := NewClient(nil, 8, "recipient", groupIDs)
+	sender := NewClient(nil, 7, "sender")
+	recipient := NewClient(nil, 8, "recipient")
 	registerGroupRecipientClient(t, hub, sender)
 	registerGroupRecipientClient(t, hub, recipient)
 	return sender, recipient
@@ -198,4 +198,12 @@ func newQueuedChatMessage(msgID string, toID uint, toType string, content string
 		Content:     content,
 		Timestamp:   1787241600,
 	}
+}
+
+func handleQueuedTestMessage(hub *Hub, msgID string, toID uint, toType string, content string) error {
+	return hub.Handle(context.Background(), newQueuedChatMessage(msgID, toID, toType, content))
+}
+
+func allowGroupMessage(context.Context, uint, uint) error {
+	return nil
 }

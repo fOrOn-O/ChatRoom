@@ -6,12 +6,10 @@ import (
 
 	"ChatRoom/internal/api/middleware"
 	"ChatRoom/internal/messagequeue"
-	"ChatRoom/internal/model"
 	"ChatRoom/internal/ws"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"gorm.io/gorm"
 )
 
 var upgrader = websocket.Upgrader{
@@ -24,7 +22,7 @@ var upgrader = websocket.Upgrader{
 }
 
 // HandleWebSocket 处理 WebSocket 连接
-func HandleWebSocket(c *gin.Context, hub *ws.Hub, db *gorm.DB, publisher messagequeue.Publisher) {
+func HandleWebSocket(c *gin.Context, hub *ws.Hub, publisher messagequeue.Publisher) {
 	// 从中间件获取用户信息
 	userID := middleware.GetUserID(c)
 	username := middleware.GetUsername(c)
@@ -37,15 +35,6 @@ func HandleWebSocket(c *gin.Context, hub *ws.Hub, db *gorm.DB, publisher message
 		return
 	}
 
-	// 修复 #3: 从数据库加载用户的群组列表
-	var groupMembers []model.GroupMember
-	db.Where("user_id = ? AND status = 1", userID).Find(&groupMembers)
-
-	groupIDs := make([]uint, 0, len(groupMembers))
-	for _, gm := range groupMembers {
-		groupIDs = append(groupIDs, gm.GroupID)
-	}
-
 	// 升级 HTTP 连接为 WebSocket
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
@@ -53,8 +42,8 @@ func HandleWebSocket(c *gin.Context, hub *ws.Hub, db *gorm.DB, publisher message
 		return
 	}
 
-	// 创建客户端，传入群组列表
-	client := ws.NewClient(conn, userID, username, groupIDs)
+	// 创建客户端
+	client := ws.NewClient(conn, userID, username)
 
 	// 注册客户端到 Hub
 	if err := hub.Register(client); err != nil {

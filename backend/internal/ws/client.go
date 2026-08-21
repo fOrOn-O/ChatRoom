@@ -31,7 +31,6 @@ type Client struct {
 	// 用户信息
 	UserID   uint   // 用户ID
 	Username string // 用户名
-	GroupIDs []uint // 加入的群组ID列表
 
 	// WebSocket 连接
 	Conn *websocket.Conn
@@ -50,13 +49,12 @@ type Client struct {
 }
 
 // NewClient 创建新的客户端
-func NewClient(conn *websocket.Conn, userID uint, username string, groupIDs []uint) *Client {
+func NewClient(conn *websocket.Conn, userID uint, username string) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Client{
 		UserID:      userID,
 		Username:    username,
-		GroupIDs:    groupIDs,
 		Conn:        conn,
 		Send:        make(chan *Message, sendBufferSize),
 		ctx:         ctx,

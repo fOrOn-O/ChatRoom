@@ -13,8 +13,6 @@ import (
 var (
 	// ErrHubClosed 表示 Hub 已进入关闭状态，不再接受新事件。
 	ErrHubClosed = errors.New("websocket hub is closed")
-	// ErrHubQueueFull 表示消息队列已满，本次消息未被接受。
-	ErrHubQueueFull = errors.New("websocket hub message queue is full")
 )
 
 type registerRequest struct {
@@ -22,8 +20,7 @@ type registerRequest struct {
 	done   chan struct{}
 }
 
-// Hub 是 WebSocket 连接管理中心
-// 使用 Channel 实现高效的消息路由，避免 map 遍历
+// Hub 是 WebSocket 连接管理与队列消息投递中心。
 type Hub struct {
 	// ========== 数据库连接 ==========
 	db                     *gorm.DB
@@ -34,14 +31,8 @@ type Hub struct {
 	register   chan registerRequest // 客户端注册
 	unregister chan *Client         // 客户端注销
 
-	// ========== 消息路由 Channel ==========
-	broadcast chan *Message // 广播消息
-	private   chan *Message // 私聊消息
-	group     chan *Message // 群聊消息
-
 	// ========== 状态管理 ==========
-	clients map[uint]*Client          // 用户ID -> 客户端
-	groups  map[uint]map[uint]*Client // 群ID -> {用户ID -> 客户端}
+	clients map[uint]*Client // 用户ID -> 客户端
 
 	// ========== 并发控制 ==========
 	mu sync.RWMutex
@@ -62,18 +53,14 @@ func NewHub(db *gorm.DB) *Hub {
 		resolveGroupRecipients: newGroupRecipientResolver(db),
 		register:               make(chan registerRequest, 256),
 		unregister:             make(chan *Client, 256),
-		broadcast:              make(chan *Message, 1024),
-		private:                make(chan *Message, 1024),
-		group:                  make(chan *Message, 1024),
 		clients:                make(map[uint]*Client),
-		groups:                 make(map[uint]map[uint]*Client),
 		ctx:                    ctx,
 		cancel:                 cancel,
 		done:                   make(chan struct{}),
 	}
 }
 
-// Run 启动 Hub 的主循环，使用 select 多路复用处理各种消息
+// Run 启动 Hub 的主循环，处理连接生命周期事件。
 func (h *Hub) Run() {
 	log.Println("Hub 已启动")
 	defer log.Println("Hub 已关闭")
@@ -89,18 +76,6 @@ func (h *Hub) Run() {
 		case client := <-h.unregister:
 			h.handleUnregister(client)
 
-		// ========== 私聊消息 ==========
-		case msg := <-h.private:
-			h.handlePrivateMessage(msg)
-
-		// ========== 群聊消息 ==========
-		case msg := <-h.group:
-			h.handleGroupMessage(msg)
-
-		// ========== 广播消息 ==========
-		case msg := <-h.broadcast:
-			h.handleBroadcastMessage(msg)
-
 		// ========== 优雅关闭 ==========
 		case <-h.ctx.Done():
 			h.cleanup()
@@ -114,26 +89,7 @@ func (h *Hub) handleRegister(client *Client) {
 	h.mu.Lock()
 
 	old, wasOnline := h.clients[client.UserID]
-	if old != nil && old != client {
-		for _, groupID := range old.GroupIDs {
-			if members, ok := h.groups[groupID]; ok && members[old.UserID] == old {
-				delete(members, old.UserID)
-				if len(members) == 0 {
-					delete(h.groups, groupID)
-				}
-			}
-		}
-	}
-
 	h.clients[client.UserID] = client
-
-	// 加入群组映射
-	for _, groupID := range client.GroupIDs {
-		if h.groups[groupID] == nil {
-			h.groups[groupID] = make(map[uint]*Client)
-		}
-		h.groups[groupID][client.UserID] = client
-	}
 
 	onlineCount := len(h.clients)
 	h.mu.Unlock()
@@ -159,15 +115,6 @@ func (h *Hub) disconnectClient(client *Client, code int, reason string) bool {
 	removed := false
 	if current, ok := h.clients[client.UserID]; ok && current == client {
 		delete(h.clients, client.UserID)
-
-		for _, groupID := range client.GroupIDs {
-			if members, ok := h.groups[groupID]; ok && members[client.UserID] == client {
-				delete(members, client.UserID)
-				if len(members) == 0 {
-					delete(h.groups, groupID)
-				}
-			}
-		}
 		removed = true
 	}
 	onlineCount := len(h.clients)
@@ -181,13 +128,6 @@ func (h *Hub) disconnectClient(client *Client, code int, reason string) bool {
 	}
 
 	return removed
-}
-
-// handlePrivateMessage 处理私聊消息
-func (h *Hub) handlePrivateMessage(msg *Message) {
-	if err := h.processPrivateMessage(h.ctx, msg); err != nil {
-		log.Printf("处理私聊消息失败: msg_id=%s err=%v", msg.MsgID, err)
-	}
 }
 
 func (h *Hub) processPrivateMessage(ctx context.Context, msg *Message) error {
@@ -215,13 +155,6 @@ func (h *Hub) processPrivateMessage(ctx context.Context, msg *Message) error {
 	// ACK 表示消息已经可靠写入历史记录，接收者离线时同样确认。
 	h.sendAck(msg.FromID, msg.MsgID, "sent")
 	return nil
-}
-
-// handleGroupMessage 处理群聊消息
-func (h *Hub) handleGroupMessage(msg *Message) {
-	if err := h.processGroupMessage(h.ctx, msg); err != nil {
-		log.Printf("处理群聊消息失败: msg_id=%s err=%v", msg.MsgID, err)
-	}
 }
 
 func (h *Hub) processGroupMessage(ctx context.Context, msg *Message) error {
@@ -275,55 +208,6 @@ func (h *Hub) sendToUser(userID uint, msg *Message) {
 	}
 }
 
-// handleBroadcastMessage 处理广播消息
-func (h *Hub) handleBroadcastMessage(msg *Message) {
-	h.mu.RLock()
-	recipients := make([]*Client, 0, len(h.clients))
-	for _, client := range h.clients {
-		recipients = append(recipients, client)
-	}
-	h.mu.RUnlock()
-
-	for _, client := range recipients {
-		if !client.TrySend(msg) {
-			h.disconnectClient(client, websocket.CloseTryAgainLater, "client too slow")
-		}
-	}
-}
-
-// SendPrivate 发送私聊消息
-func (h *Hub) SendPrivate(msg *Message) error {
-	return h.enqueueMessage(h.private, msg)
-}
-
-// SendGroup 发送群聊消息
-func (h *Hub) SendGroup(msg *Message) error {
-	return h.enqueueMessage(h.group, msg)
-}
-
-// Broadcast 广播消息
-func (h *Hub) Broadcast(msg *Message) error {
-	return h.enqueueMessage(h.broadcast, msg)
-}
-
-// enqueueMessage 将消息非阻塞地放入指定队列，并返回明确的失败原因。
-func (h *Hub) enqueueMessage(queue chan<- *Message, msg *Message) error {
-	select {
-	case <-h.ctx.Done():
-		return ErrHubClosed
-	default:
-	}
-
-	select {
-	case queue <- msg:
-		return nil
-	case <-h.ctx.Done():
-		return ErrHubClosed
-	default:
-		return ErrHubQueueFull
-	}
-}
-
 // broadcastOnlineStatus 广播用户在线状态
 func (h *Hub) broadcastOnlineStatus(userID uint, online bool) {
 	// 修复 #5: 使用 Data 字段而非 Raw，确保 JSON 序列化正确
@@ -371,7 +255,6 @@ func (h *Hub) cleanup() {
 	}
 
 	h.clients = make(map[uint]*Client)
-	h.groups = make(map[uint]map[uint]*Client)
 	h.mu.Unlock()
 
 	for _, client := range clients {

@@ -15,25 +15,20 @@ func TestRemovedOnlineMemberDoesNotReceiveGroupMessage(t *testing.T) {
 	)
 
 	hub := newHubWithSuccessfulPersistence(t)
+	hub.authorizeGroupMessage = allowGroupMessage
 	hub.resolveGroupRecipients = func(context.Context, uint) ([]uint, error) {
 		return []uint{senderID}, nil
 	}
 	startGroupRecipientHub(t, hub)
 
-	sender := NewClient(nil, senderID, "sender", []uint{groupID})
-	removedMember := NewClient(nil, removedMemberID, "removed", []uint{groupID})
+	sender := NewClient(nil, senderID, "sender")
+	removedMember := NewClient(nil, removedMemberID, "removed")
 	registerGroupRecipientClient(t, hub, sender)
 	registerGroupRecipientClient(t, hub, removedMember)
 
-	hub.SendGroup(&Message{
-		MsgID:       "56aa3068-f76d-4756-92c6-257ea30f8714",
-		Type:        MsgTypeChat,
-		FromID:      senderID,
-		ToID:        groupID,
-		ToType:      ToTypeGroup,
-		ContentType: ContentTypeText,
-		Content:     "current members only",
-	})
+	if err := handleQueuedTestMessage(hub, "56aa3068-f76d-4756-92c6-257ea30f8714", groupID, ToTypeGroup, "current members only"); err != nil {
+		t.Fatalf("处理群聊消息失败: %v", err)
+	}
 
 	waitForClientMessageType(t, sender, MsgTypeChatAck)
 	assertClientReceivesNoChatMessage(t, removedMember)
@@ -47,30 +42,25 @@ func TestNewlyInvitedOnlineMemberReceivesGroupMessageWithoutReconnect(t *testing
 	)
 
 	hub := newHubWithSuccessfulPersistence(t)
+	hub.authorizeGroupMessage = allowGroupMessage
 	hub.resolveGroupRecipients = func(context.Context, uint) ([]uint, error) {
 		return []uint{senderID, invitedMemberID}, nil
 	}
 	startGroupRecipientHub(t, hub)
 
-	sender := NewClient(nil, senderID, "sender", []uint{groupID})
-	invitedMember := NewClient(nil, invitedMemberID, "invited", nil)
+	sender := NewClient(nil, senderID, "sender")
+	invitedMember := NewClient(nil, invitedMemberID, "invited")
 	registerGroupRecipientClient(t, hub, sender)
 	registerGroupRecipientClient(t, hub, invitedMember)
 
-	message := &Message{
-		MsgID:       "0182d374-a195-4e70-890c-416e33967f76",
-		Type:        MsgTypeChat,
-		FromID:      senderID,
-		ToID:        groupID,
-		ToType:      ToTypeGroup,
-		ContentType: ContentTypeText,
-		Content:     "welcome to the group",
+	const msgID = "0182d374-a195-4e70-890c-416e33967f76"
+	if err := handleQueuedTestMessage(hub, msgID, groupID, ToTypeGroup, "welcome to the group"); err != nil {
+		t.Fatalf("处理群聊消息失败: %v", err)
 	}
-	hub.SendGroup(message)
 
 	received := waitForClientMessageType(t, invitedMember, MsgTypeChat)
-	if received.MsgID != message.MsgID {
-		t.Fatalf("received message ID = %q, want %q", received.MsgID, message.MsgID)
+	if received.MsgID != msgID {
+		t.Fatalf("received message ID = %q, want %q", received.MsgID, msgID)
 	}
 }
 
@@ -82,26 +72,21 @@ func TestGroupRecipientLookupFailureDoesNotDeliverMessage(t *testing.T) {
 	)
 
 	hub := NewHub(nil)
+	hub.authorizeGroupMessage = allowGroupMessage
 	hub.resolveGroupRecipients = func(context.Context, uint) ([]uint, error) {
 		return nil, errGroupRecipientResolutionUnavailable
 	}
 	startGroupRecipientHub(t, hub)
 
-	sender := NewClient(nil, senderID, "sender", []uint{groupID})
-	member := NewClient(nil, memberID, "member", []uint{groupID})
+	sender := NewClient(nil, senderID, "sender")
+	member := NewClient(nil, memberID, "member")
 	registerGroupRecipientClient(t, hub, sender)
 	registerGroupRecipientClient(t, hub, member)
 
 	const msgID = "0d2ce48e-5dbd-4e36-a7e8-90405bc09c7f"
-	hub.SendGroup(&Message{
-		MsgID:       msgID,
-		Type:        MsgTypeChat,
-		FromID:      senderID,
-		ToID:        groupID,
-		ToType:      ToTypeGroup,
-		ContentType: ContentTypeText,
-		Content:     "must not leak on lookup failure",
-	})
+	if err := handleQueuedTestMessage(hub, msgID, groupID, ToTypeGroup, "must not leak on lookup failure"); !errors.Is(err, errGroupRecipientResolutionUnavailable) {
+		t.Fatalf("处理群成员解析失败的消息时错误 = %v，期望 errGroupRecipientResolutionUnavailable", err)
+	}
 
 	response := waitForClientMessageType(t, sender, MsgTypeError)
 	data, ok := response.Data.(map[string]interface{})

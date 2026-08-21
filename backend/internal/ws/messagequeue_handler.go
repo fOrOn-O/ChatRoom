@@ -8,7 +8,7 @@ import (
 
 var _ messagequeue.Handler = (*Hub)(nil)
 
-// Handle 处理消费者交付的聊天消息，并复用 Hub 现有持久化与投递逻辑。
+// Handle 处理消费者交付的聊天消息，并统一执行持久化与实时投递。
 func (h *Hub) Handle(ctx context.Context, queued messagequeue.ChatMessage) error {
 	if err := queued.Validate(); err != nil {
 		return err

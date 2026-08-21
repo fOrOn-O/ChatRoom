@@ -124,7 +124,7 @@ func (r *Router) setupRoutes() {
 
 	// WebSocket（需要登录）
 	r.engine.GET("/ws", middleware.Auth(r.secret), func(c *gin.Context) {
-		handler.HandleWebSocket(c, r.hub, r.db, r.publisher)
+		handler.HandleWebSocket(c, r.hub, r.publisher)
 	})
 
 	// 静态文件（前端）

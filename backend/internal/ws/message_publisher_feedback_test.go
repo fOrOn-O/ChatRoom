@@ -11,11 +11,11 @@ func TestPrivatePublishFailureReturnsErrorToSender(t *testing.T) {
 	hub := NewHub(nil)
 
 	peer, server := websocketPairForAuthorization(t)
-	client := NewClient(server, 7, "alice", nil)
+	client := NewClient(server, 7, "alice")
 	go client.WritePump()
 	go client.ReadPump(hub, &recordingMessagePublisher{err: errors.New("Redis 暂时不可用")})
 
-	const msgID = "private-queue-full-feedback"
+	const msgID = "private-publish-failure-feedback"
 	if err := peer.WriteJSON(map[string]any{
 		"type": MsgTypeChat,
 		"data": map[string]any{
@@ -39,11 +39,11 @@ func TestGroupPublishFailureReturnsErrorToSender(t *testing.T) {
 	}
 
 	peer, server := websocketPairForAuthorization(t)
-	client := NewClient(server, 7, "alice", []uint{42})
+	client := NewClient(server, 7, "alice")
 	go client.WritePump()
 	go client.ReadPump(hub, &recordingMessagePublisher{err: errors.New("Redis 暂时不可用")})
 
-	const msgID = "group-queue-full-feedback"
+	const msgID = "group-publish-failure-feedback"
 	if err := peer.WriteJSON(map[string]any{
 		"type": MsgTypeChat,
 		"data": map[string]any{

@@ -9,11 +9,11 @@ import (
 	"ChatRoom/internal/messagequeue"
 )
 
-func TestPrivateMessagePublishesWithoutEnteringHubQueueOrAcknowledgingEarly(t *testing.T) {
+func TestPrivateMessagePublishesWithoutAcknowledgingEarly(t *testing.T) {
 	hub := NewHub(nil)
 	publisher := &recordingMessagePublisher{messages: make(chan messagequeue.ChatMessage, 1)}
 	peer, server := websocketPairForAuthorization(t)
-	client := NewClient(server, 7, "alice", nil)
+	client := NewClient(server, 7, "alice")
 	go client.WritePump()
 	go client.ReadPump(hub, publisher)
 
@@ -44,9 +44,6 @@ func TestPrivateMessagePublishesWithoutEnteringHubQueueOrAcknowledgingEarly(t *t
 		t.Fatal("私聊消息未发布到消息队列")
 	}
 
-	if len(hub.private) != 0 {
-		t.Fatalf("Hub 私聊队列长度 = %d，期望 0", len(hub.private))
-	}
 	if err := peer.SetReadDeadline(time.Now().Add(150 * time.Millisecond)); err != nil {
 		t.Fatalf("设置读取超时失败: %v", err)
 	}

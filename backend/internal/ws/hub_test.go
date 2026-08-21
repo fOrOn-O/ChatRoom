@@ -19,11 +19,11 @@ func TestNewConnectionReplacesOldConnection(t *testing.T) {
 	hub := startHub(t)
 
 	oldPeer, oldServer := websocketPair(t)
-	oldClient := chatws.NewClient(oldServer, 7, "alice", []uint{11})
+	oldClient := chatws.NewClient(oldServer, 7, "alice")
 	startClient(t, hub, oldClient)
 
 	newPeer, newServer := websocketPair(t)
-	newClient := chatws.NewClient(newServer, 7, "alice", []uint{11})
+	newClient := chatws.NewClient(newServer, 7, "alice")
 	startClient(t, hub, newClient)
 
 	if err := oldPeer.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
@@ -46,7 +46,7 @@ func TestNewConnectionReplacesOldConnection(t *testing.T) {
 }
 
 func TestClosedClientRejectsMessages(t *testing.T) {
-	client := chatws.NewClient(nil, 9, "closed", nil)
+	client := chatws.NewClient(nil, 9, "closed")
 	client.Close()
 
 	if client.TrySend(&chatws.Message{Type: chatws.MsgTypeChat}) {
@@ -56,7 +56,7 @@ func TestClosedClientRejectsMessages(t *testing.T) {
 
 func TestSlowConsumerIsRemovedAndClosed(t *testing.T) {
 	hub := startHub(t)
-	client := chatws.NewClient(nil, 12, "slow", nil)
+	client := chatws.NewClient(nil, 12, "slow")
 	if err := hub.Register(client); err != nil {
 		t.Fatalf("register slow client: %v", err)
 	}
@@ -65,12 +65,10 @@ func TestSlowConsumerIsRemovedAndClosed(t *testing.T) {
 	for client.TrySend(&chatws.Message{Type: chatws.MsgTypeChat}) {
 	}
 
-	hub.Broadcast(&chatws.Message{
-		Type:   chatws.MsgTypeChat,
-		FromID: 99,
-		ToID:   12,
-		ToType: chatws.ToTypeUser,
-	})
+	trigger := chatws.NewClient(nil, 13, "trigger")
+	if err := hub.Register(trigger); err != nil {
+		t.Fatalf("register online-status trigger: %v", err)
+	}
 
 	eventually(t, func() bool { return !hub.IsUserOnline(12) })
 	if client.TrySend(&chatws.Message{Type: chatws.MsgTypeChat}) {
@@ -82,7 +80,7 @@ func TestRegisterCommitsBeforeReturning(t *testing.T) {
 	hub := startHub(t)
 
 	for userID := uint(100); userID < 120; userID++ {
-		client := chatws.NewClient(nil, userID, "queued", nil)
+		client := chatws.NewClient(nil, userID, "queued")
 		if err := hub.Register(client); err != nil {
 			t.Fatalf("register user %d: %v", userID, err)
 		}
@@ -96,9 +94,9 @@ func TestHubShutdownClosesConnectionsAndRejectsRegistration(t *testing.T) {
 	hub := startHub(t)
 
 	firstPeer, firstServer := websocketPair(t)
-	startClient(t, hub, chatws.NewClient(firstServer, 31, "first", nil))
+	startClient(t, hub, chatws.NewClient(firstServer, 31, "first"))
 	secondPeer, secondServer := websocketPair(t)
-	startClient(t, hub, chatws.NewClient(secondServer, 32, "second", nil))
+	startClient(t, hub, chatws.NewClient(secondServer, 32, "second"))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -111,7 +109,7 @@ func TestHubShutdownClosesConnectionsAndRejectsRegistration(t *testing.T) {
 	if got := hub.GetOnlineCount(); got != 0 {
 		t.Fatalf("online count after shutdown = %d, want 0", got)
 	}
-	if err := hub.Register(chatws.NewClient(nil, 33, "late", nil)); !errors.Is(err, chatws.ErrHubClosed) {
+	if err := hub.Register(chatws.NewClient(nil, 33, "late")); !errors.Is(err, chatws.ErrHubClosed) {
 		t.Fatalf("register after shutdown error = %v, want %v", err, chatws.ErrHubClosed)
 	}
 	if err := hub.Shutdown(ctx); err != nil {
@@ -122,7 +120,7 @@ func TestHubShutdownClosesConnectionsAndRejectsRegistration(t *testing.T) {
 func TestPeerDisconnectRemovesCurrentConnection(t *testing.T) {
 	hub := startHub(t)
 	peer, server := websocketPair(t)
-	startClient(t, hub, chatws.NewClient(server, 41, "leaving", []uint{51}))
+	startClient(t, hub, chatws.NewClient(server, 41, "leaving"))
 
 	if err := peer.Close(); err != nil {
 		t.Fatalf("close peer: %v", err)
@@ -142,17 +140,11 @@ func TestConcurrentConnectionChurnKeepsLatestClient(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			client := chatws.NewClient(nil, userID, "churn", []uint{81})
+			client := chatws.NewClient(nil, userID, "churn")
 			if err := hub.Register(client); err != nil {
 				errs <- err
 				return
 			}
-			hub.Broadcast(&chatws.Message{
-				Type:   chatws.MsgTypeChat,
-				FromID: 99,
-				ToID:   81,
-				ToType: chatws.ToTypeGroup,
-			})
 			hub.Unregister(client)
 		}()
 	}
@@ -162,7 +154,7 @@ func TestConcurrentConnectionChurnKeepsLatestClient(t *testing.T) {
 		t.Fatalf("connection churn registration failed: %v", err)
 	}
 
-	latest := chatws.NewClient(nil, userID, "latest", []uint{82})
+	latest := chatws.NewClient(nil, userID, "latest")
 	if err := hub.Register(latest); err != nil {
 		t.Fatalf("register latest client: %v", err)
 	}

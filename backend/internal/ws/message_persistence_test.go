@@ -23,20 +23,14 @@ func TestPrivateMessagePersistenceFailureDoesNotDeliver(t *testing.T) {
 	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 
-	sender := NewClient(nil, 7, "sender", nil)
-	recipient := NewClient(nil, 8, "recipient", nil)
+	sender := NewClient(nil, 7, "sender")
+	recipient := NewClient(nil, 8, "recipient")
 	registerGroupRecipientClient(t, hub, sender)
 	registerGroupRecipientClient(t, hub, recipient)
 
-	hub.SendPrivate(&Message{
-		MsgID:       "private-write-failure",
-		Type:        MsgTypeChat,
-		FromID:      sender.UserID,
-		ToID:        recipient.UserID,
-		ToType:      ToTypeUser,
-		ContentType: ContentTypeText,
-		Content:     "must not deliver",
-	})
+	if err := handleQueuedTestMessage(hub, "private-write-failure", recipient.UserID, ToTypeUser, "must not deliver"); !errors.Is(err, errMessagePersistenceUnavailable) {
+		t.Fatalf("处理持久化失败的私聊消息时错误 = %v，期望 errMessagePersistenceUnavailable", err)
+	}
 
 	response := waitForClientMessageType(t, sender, MsgTypeError)
 	assertInternalMessageError(t, response, "private-write-failure")
@@ -51,25 +45,20 @@ func TestGroupMessagePersistenceFailureDoesNotDeliver(t *testing.T) {
 		WillReturnError(errors.New("database unavailable"))
 
 	hub := NewHub(db)
+	hub.authorizeGroupMessage = allowGroupMessage
 	hub.resolveGroupRecipients = func(context.Context, uint) ([]uint, error) {
 		return []uint{7, 8}, nil
 	}
 	startGroupRecipientHub(t, hub)
 
-	sender := NewClient(nil, 7, "sender", []uint{42})
-	recipient := NewClient(nil, 8, "recipient", []uint{42})
+	sender := NewClient(nil, 7, "sender")
+	recipient := NewClient(nil, 8, "recipient")
 	registerGroupRecipientClient(t, hub, sender)
 	registerGroupRecipientClient(t, hub, recipient)
 
-	hub.SendGroup(&Message{
-		MsgID:       "group-write-failure",
-		Type:        MsgTypeChat,
-		FromID:      sender.UserID,
-		ToID:        42,
-		ToType:      ToTypeGroup,
-		ContentType: ContentTypeText,
-		Content:     "must not deliver",
-	})
+	if err := handleQueuedTestMessage(hub, "group-write-failure", 42, ToTypeGroup, "must not deliver"); !errors.Is(err, errMessagePersistenceUnavailable) {
+		t.Fatalf("处理持久化失败的群聊消息时错误 = %v，期望 errMessagePersistenceUnavailable", err)
+	}
 
 	response := waitForClientMessageType(t, sender, MsgTypeError)
 	assertInternalMessageError(t, response, "group-write-failure")
@@ -89,23 +78,18 @@ func TestGroupRecipientLookupFailureDoesNotPersist(t *testing.T) {
 	}
 
 	hub := NewHub(db)
+	hub.authorizeGroupMessage = allowGroupMessage
 	hub.resolveGroupRecipients = func(context.Context, uint) ([]uint, error) {
 		return nil, errGroupRecipientResolutionUnavailable
 	}
 	startGroupRecipientHub(t, hub)
 
-	sender := NewClient(nil, 7, "sender", []uint{42})
+	sender := NewClient(nil, 7, "sender")
 	registerGroupRecipientClient(t, hub, sender)
 
-	hub.SendGroup(&Message{
-		MsgID:       "recipient-lookup-failure",
-		Type:        MsgTypeChat,
-		FromID:      sender.UserID,
-		ToID:        42,
-		ToType:      ToTypeGroup,
-		ContentType: ContentTypeText,
-		Content:     "must not persist",
-	})
+	if err := handleQueuedTestMessage(hub, "recipient-lookup-failure", 42, ToTypeGroup, "must not persist"); !errors.Is(err, errGroupRecipientResolutionUnavailable) {
+		t.Fatalf("处理群成员解析失败的消息时错误 = %v，期望 errGroupRecipientResolutionUnavailable", err)
+	}
 
 	response := waitForClientMessageType(t, sender, MsgTypeError)
 	assertInternalMessageError(t, response, "recipient-lookup-failure")
@@ -123,18 +107,12 @@ func TestOfflinePrivateMessageAcknowledgedAfterPersistence(t *testing.T) {
 	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 
-	sender := NewClient(nil, 7, "sender", nil)
+	sender := NewClient(nil, 7, "sender")
 	registerGroupRecipientClient(t, hub, sender)
 
-	hub.SendPrivate(&Message{
-		MsgID:       "offline-private-success",
-		Type:        MsgTypeChat,
-		FromID:      sender.UserID,
-		ToID:        8,
-		ToType:      ToTypeUser,
-		ContentType: ContentTypeText,
-		Content:     "persisted for history",
-	})
+	if err := handleQueuedTestMessage(hub, "offline-private-success", 8, ToTypeUser, "persisted for history"); err != nil {
+		t.Fatalf("处理离线私聊消息失败: %v", err)
+	}
 
 	response := waitForClientMessageType(t, sender, MsgTypeChatAck)
 	assertMessageAck(t, response, "offline-private-success", "sent")
@@ -149,20 +127,14 @@ func TestOnlinePrivateMessageDeliveredAfterPersistence(t *testing.T) {
 	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 
-	sender := NewClient(nil, 7, "sender", nil)
-	recipient := NewClient(nil, 8, "recipient", nil)
+	sender := NewClient(nil, 7, "sender")
+	recipient := NewClient(nil, 8, "recipient")
 	registerGroupRecipientClient(t, hub, sender)
 	registerGroupRecipientClient(t, hub, recipient)
 
-	hub.SendPrivate(&Message{
-		MsgID:       "online-private-success",
-		Type:        MsgTypeChat,
-		FromID:      sender.UserID,
-		ToID:        recipient.UserID,
-		ToType:      ToTypeUser,
-		ContentType: ContentTypeText,
-		Content:     "persisted before delivery",
-	})
+	if err := handleQueuedTestMessage(hub, "online-private-success", recipient.UserID, ToTypeUser, "persisted before delivery"); err != nil {
+		t.Fatalf("处理在线私聊消息失败: %v", err)
+	}
 
 	received := waitForClientMessageType(t, recipient, MsgTypeChat)
 	if received.MsgID != "online-private-success" {
@@ -186,20 +158,14 @@ func TestDuplicatePrivateMessageAcknowledgedWithoutRedelivery(t *testing.T) {
 	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 
-	sender := NewClient(nil, 7, "sender", nil)
-	recipient := NewClient(nil, 8, "recipient", nil)
+	sender := NewClient(nil, 7, "sender")
+	recipient := NewClient(nil, 8, "recipient")
 	registerGroupRecipientClient(t, hub, sender)
 	registerGroupRecipientClient(t, hub, recipient)
 
-	hub.SendPrivate(&Message{
-		MsgID:       "duplicate-private",
-		Type:        MsgTypeChat,
-		FromID:      sender.UserID,
-		ToID:        recipient.UserID,
-		ToType:      ToTypeUser,
-		ContentType: ContentTypeText,
-		Content:     "already persisted",
-	})
+	if err := handleQueuedTestMessage(hub, "duplicate-private", recipient.UserID, ToTypeUser, "already persisted"); err != nil {
+		t.Fatalf("处理重复私聊消息失败: %v", err)
+	}
 
 	response := waitForClientMessageType(t, sender, MsgTypeChatAck)
 	assertMessageAck(t, response, "duplicate-private", "sent")
@@ -219,25 +185,20 @@ func TestDuplicateGroupMessageAcknowledgedWithoutRedelivery(t *testing.T) {
 		}).AddRow(uint(7), uint(42), ToTypeGroup, ContentTypeText, "already persisted"))
 
 	hub := NewHub(db)
+	hub.authorizeGroupMessage = allowGroupMessage
 	hub.resolveGroupRecipients = func(context.Context, uint) ([]uint, error) {
 		return []uint{7, 8}, nil
 	}
 	startGroupRecipientHub(t, hub)
 
-	sender := NewClient(nil, 7, "sender", []uint{42})
-	recipient := NewClient(nil, 8, "recipient", []uint{42})
+	sender := NewClient(nil, 7, "sender")
+	recipient := NewClient(nil, 8, "recipient")
 	registerGroupRecipientClient(t, hub, sender)
 	registerGroupRecipientClient(t, hub, recipient)
 
-	hub.SendGroup(&Message{
-		MsgID:       "duplicate-group",
-		Type:        MsgTypeChat,
-		FromID:      sender.UserID,
-		ToID:        42,
-		ToType:      ToTypeGroup,
-		ContentType: ContentTypeText,
-		Content:     "already persisted",
-	})
+	if err := handleQueuedTestMessage(hub, "duplicate-group", 42, ToTypeGroup, "already persisted"); err != nil {
+		t.Fatalf("处理重复群聊消息失败: %v", err)
+	}
 
 	response := waitForClientMessageType(t, sender, MsgTypeChatAck)
 	assertMessageAck(t, response, "duplicate-group", "sent")
@@ -259,20 +220,14 @@ func TestMessageIDConflictWithDifferentContentIsRejected(t *testing.T) {
 	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 
-	sender := NewClient(nil, 7, "sender", nil)
-	recipient := NewClient(nil, 8, "recipient", nil)
+	sender := NewClient(nil, 7, "sender")
+	recipient := NewClient(nil, 8, "recipient")
 	registerGroupRecipientClient(t, hub, sender)
 	registerGroupRecipientClient(t, hub, recipient)
 
-	hub.SendPrivate(&Message{
-		MsgID:       "content-conflict",
-		Type:        MsgTypeChat,
-		FromID:      sender.UserID,
-		ToID:        recipient.UserID,
-		ToType:      ToTypeUser,
-		ContentType: ContentTypeText,
-		Content:     "new content",
-	})
+	if err := handleQueuedTestMessage(hub, "content-conflict", recipient.UserID, ToTypeUser, "new content"); !errors.Is(err, errMessageIDConflict) {
+		t.Fatalf("处理内容冲突的消息时错误 = %v，期望 errMessageIDConflict", err)
+	}
 
 	response := waitForClientMessageType(t, sender, MsgTypeError)
 	assertMessageErrorCode(t, response, "content-conflict", errorCodeInvalidMessage)
@@ -294,20 +249,14 @@ func TestMessageIDConflictWithDifferentSenderIsRejected(t *testing.T) {
 	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 
-	sender := NewClient(nil, 7, "sender", nil)
-	recipient := NewClient(nil, 8, "recipient", nil)
+	sender := NewClient(nil, 7, "sender")
+	recipient := NewClient(nil, 8, "recipient")
 	registerGroupRecipientClient(t, hub, sender)
 	registerGroupRecipientClient(t, hub, recipient)
 
-	hub.SendPrivate(&Message{
-		MsgID:       "sender-conflict",
-		Type:        MsgTypeChat,
-		FromID:      sender.UserID,
-		ToID:        recipient.UserID,
-		ToType:      ToTypeUser,
-		ContentType: ContentTypeText,
-		Content:     "same content",
-	})
+	if err := handleQueuedTestMessage(hub, "sender-conflict", recipient.UserID, ToTypeUser, "same content"); !errors.Is(err, errMessageIDConflict) {
+		t.Fatalf("处理发送者冲突的消息时错误 = %v，期望 errMessageIDConflict", err)
+	}
 
 	response := waitForClientMessageType(t, sender, MsgTypeError)
 	assertMessageErrorCode(t, response, "sender-conflict", errorCodeInvalidMessage)
@@ -329,20 +278,14 @@ func TestMessageIDConflictWithDifferentTargetIsRejected(t *testing.T) {
 	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 
-	sender := NewClient(nil, 7, "sender", nil)
-	recipient := NewClient(nil, 8, "recipient", nil)
+	sender := NewClient(nil, 7, "sender")
+	recipient := NewClient(nil, 8, "recipient")
 	registerGroupRecipientClient(t, hub, sender)
 	registerGroupRecipientClient(t, hub, recipient)
 
-	hub.SendPrivate(&Message{
-		MsgID:       "target-conflict",
-		Type:        MsgTypeChat,
-		FromID:      sender.UserID,
-		ToID:        recipient.UserID,
-		ToType:      ToTypeUser,
-		ContentType: ContentTypeText,
-		Content:     "same content",
-	})
+	if err := handleQueuedTestMessage(hub, "target-conflict", recipient.UserID, ToTypeUser, "same content"); !errors.Is(err, errMessageIDConflict) {
+		t.Fatalf("处理接收者冲突的消息时错误 = %v，期望 errMessageIDConflict", err)
+	}
 
 	response := waitForClientMessageType(t, sender, MsgTypeError)
 	assertMessageErrorCode(t, response, "target-conflict", errorCodeInvalidMessage)
@@ -362,20 +305,14 @@ func TestDuplicateMessageLookupFailureDoesNotAcknowledgeOrDeliver(t *testing.T) 
 	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 
-	sender := NewClient(nil, 7, "sender", nil)
-	recipient := NewClient(nil, 8, "recipient", nil)
+	sender := NewClient(nil, 7, "sender")
+	recipient := NewClient(nil, 8, "recipient")
 	registerGroupRecipientClient(t, hub, sender)
 	registerGroupRecipientClient(t, hub, recipient)
 
-	hub.SendPrivate(&Message{
-		MsgID:       "duplicate-lookup-failure",
-		Type:        MsgTypeChat,
-		FromID:      sender.UserID,
-		ToID:        recipient.UserID,
-		ToType:      ToTypeUser,
-		ContentType: ContentTypeText,
-		Content:     "unknown duplicate",
-	})
+	if err := handleQueuedTestMessage(hub, "duplicate-lookup-failure", recipient.UserID, ToTypeUser, "unknown duplicate"); !errors.Is(err, errMessagePersistenceUnavailable) {
+		t.Fatalf("查询重复消息失败时错误 = %v，期望 errMessagePersistenceUnavailable", err)
+	}
 
 	response := waitForClientMessageType(t, sender, MsgTypeError)
 	assertInternalMessageError(t, response, "duplicate-lookup-failure")

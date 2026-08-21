@@ -33,7 +33,7 @@ func TestNonMemberCannotSendGroupMessage(t *testing.T) {
 	})
 
 	peer, server := websocketPairForAuthorization(t)
-	client := NewClient(server, 7, "alice", nil)
+	client := NewClient(server, 7, "alice")
 	if err := hub.Register(client); err != nil {
 		t.Fatalf("register client: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestAuthorizedMemberCanSendGroupMessage(t *testing.T) {
 	})
 
 	peer, server := websocketPairForAuthorization(t)
-	client := NewClient(server, 7, "alice", []uint{42})
+	client := NewClient(server, 7, "alice")
 	if err := hub.Register(client); err != nil {
 		t.Fatalf("register client: %v", err)
 	}
