@@ -43,8 +43,22 @@ func main() {
 	defer rdb.Close()
 
 	// 5. 创建 WebSocket Hub
-	hub := ws.NewHub(db, rdb)
+	hub := ws.NewHub(db)
 	go hub.Run()
+	hostname, hostnameErr := os.Hostname()
+	if hostnameErr != nil || hostname == "" {
+		hostname = "chatroom"
+	}
+	queueRuntime, err := startMessageQueueRuntime(
+		context.Background(),
+		rdb,
+		hub,
+		cfg.Redis.Stream,
+		fmt.Sprintf("%s-%d", hostname, os.Getpid()),
+	)
+	if err != nil {
+		log.Fatalf("初始化 Redis Streams 消息队列失败: %v", err)
+	}
 
 	// 6. 初始化路由
 	router := api.NewRouter(hub, db, cfg.JWT.Secret)
@@ -63,11 +77,23 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 	shutdownComplete := make(chan struct{})
+	queueFailure := make(chan error, 1)
+	go func() {
+		<-queueRuntime.Done()
+		if err := queueRuntime.Err(); err != nil {
+			queueFailure <- err
+		}
+	}()
 
 	go func() {
 		defer close(shutdownComplete)
-		<-sigCh
-		log.Println("收到关闭信号，正在优雅关闭...")
+		var consumerFailure error
+		select {
+		case <-sigCh:
+			log.Println("收到关闭信号，正在优雅关闭...")
+		case consumerFailure = <-queueFailure:
+			log.Printf("Redis Streams 消费者异常退出，正在关闭服务: %v", consumerFailure)
+		}
 
 		// 给予 10 秒时间处理未完成的请求
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -78,6 +104,9 @@ func main() {
 			serverShutdown <- server.Shutdown(shutdownCtx)
 		}()
 
+		if err := queueRuntime.Shutdown(shutdownCtx); err != nil && consumerFailure == nil {
+			log.Printf("Redis Streams 消费者关闭错误: %v", err)
+		}
 		if err := hub.Shutdown(shutdownCtx); err != nil {
 			log.Printf("WebSocket Hub 关闭错误: %v", err)
 		}
@@ -90,6 +119,9 @@ func main() {
 	log.Printf("服务器启动在 %s", server.Addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if shutdownErr := queueRuntime.Shutdown(shutdownCtx); shutdownErr != nil {
+			log.Printf("Redis Streams 消费者关闭错误: %v", shutdownErr)
+		}
 		if shutdownErr := hub.Shutdown(shutdownCtx); shutdownErr != nil {
 			log.Printf("WebSocket Hub 关闭错误: %v", shutdownErr)
 		}

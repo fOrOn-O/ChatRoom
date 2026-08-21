@@ -8,7 +8,7 @@ import (
 )
 
 func TestPrivateQueueFullReturnsErrorToSender(t *testing.T) {
-	hub := NewHub(nil, nil)
+	hub := NewHub(nil)
 	fillPrivateQueue(t, hub)
 
 	peer, server := websocketPairForAuthorization(t)
@@ -34,7 +34,7 @@ func TestPrivateQueueFullReturnsErrorToSender(t *testing.T) {
 }
 
 func TestGroupQueueFullReturnsErrorToSender(t *testing.T) {
-	hub := NewHub(nil, nil)
+	hub := NewHub(nil)
 	hub.authorizeGroupMessage = func(context.Context, uint, uint) error {
 		return nil
 	}

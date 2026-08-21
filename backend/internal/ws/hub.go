@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -28,7 +27,6 @@ type registerRequest struct {
 type Hub struct {
 	// ========== 数据库连接 ==========
 	db                     *gorm.DB
-	rdb                    *redis.Client
 	authorizeGroupMessage  groupMessageAuthorizer
 	resolveGroupRecipients groupRecipientResolver
 
@@ -55,12 +53,11 @@ type Hub struct {
 }
 
 // NewHub 创建新的 Hub 实例
-func NewHub(db *gorm.DB, rdb *redis.Client) *Hub {
+func NewHub(db *gorm.DB) *Hub {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Hub{
 		db:                     db,
-		rdb:                    rdb,
 		authorizeGroupMessage:  newGroupMessageAuthorizer(db),
 		resolveGroupRecipients: newGroupRecipientResolver(db),
 		register:               make(chan registerRequest, 256),

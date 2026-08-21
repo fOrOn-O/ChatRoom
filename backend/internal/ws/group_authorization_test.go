@@ -15,7 +15,7 @@ import (
 )
 
 func TestNonMemberCannotSendGroupMessage(t *testing.T) {
-	hub := NewHub(nil, nil)
+	hub := NewHub(nil)
 	var authorizedUserID uint
 	var authorizedGroupID uint
 	hub.authorizeGroupMessage = func(_ context.Context, userID uint, groupID uint) error {

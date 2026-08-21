@@ -24,7 +24,7 @@ redis:
   dial_timeout: 5s
   read_timeout: 3s
   write_timeout: 3s
-  # 当前阶段仅预留 Streams 参数，消息仍由 WebSocket Hub 处理。
+  # Streams 消费者已随服务启动；聊天发送入口切换前，消息仍由 WebSocket Hub 直接处理。
   stream:
     # 留空时会根据 key_prefix 生成；只有需要兼容既有键名时才显式填写。
     # chat_key: custom:stream:chat

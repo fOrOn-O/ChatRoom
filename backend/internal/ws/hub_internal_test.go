@@ -7,7 +7,7 @@ import (
 )
 
 func TestReplacingClientRemovesOldGroupMembership(t *testing.T) {
-	hub := NewHub(nil, nil)
+	hub := NewHub(nil)
 	go hub.Run()
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)

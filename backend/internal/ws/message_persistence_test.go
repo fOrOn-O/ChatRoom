@@ -20,7 +20,7 @@ func TestPrivateMessagePersistenceFailureDoesNotDeliver(t *testing.T) {
 		WithArgs("private-write-failure", uint(7), uint(8), ToTypeUser, ContentTypeText, "must not deliver").
 		WillReturnError(errors.New("database unavailable"))
 
-	hub := NewHub(db, nil)
+	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 
 	sender := NewClient(nil, 7, "sender", nil)
@@ -50,7 +50,7 @@ func TestGroupMessagePersistenceFailureDoesNotDeliver(t *testing.T) {
 		WithArgs("group-write-failure", uint(7), uint(42), ToTypeGroup, ContentTypeText, "must not deliver").
 		WillReturnError(errors.New("database unavailable"))
 
-	hub := NewHub(db, nil)
+	hub := NewHub(db)
 	hub.resolveGroupRecipients = func(context.Context, uint) ([]uint, error) {
 		return []uint{7, 8}, nil
 	}
@@ -88,7 +88,7 @@ func TestGroupRecipientLookupFailureDoesNotPersist(t *testing.T) {
 		t.Fatalf("register persistence callback: %v", err)
 	}
 
-	hub := NewHub(db, nil)
+	hub := NewHub(db)
 	hub.resolveGroupRecipients = func(context.Context, uint) ([]uint, error) {
 		return nil, errGroupRecipientResolutionUnavailable
 	}
@@ -120,7 +120,7 @@ func TestOfflinePrivateMessageAcknowledgedAfterPersistence(t *testing.T) {
 		WithArgs("offline-private-success", uint(7), uint(8), ToTypeUser, ContentTypeText, "persisted for history").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	hub := NewHub(db, nil)
+	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 
 	sender := NewClient(nil, 7, "sender", nil)
@@ -146,7 +146,7 @@ func TestOnlinePrivateMessageDeliveredAfterPersistence(t *testing.T) {
 		WithArgs("online-private-success", uint(7), uint(8), ToTypeUser, ContentTypeText, "persisted before delivery").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	hub := NewHub(db, nil)
+	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 
 	sender := NewClient(nil, 7, "sender", nil)
@@ -183,7 +183,7 @@ func TestDuplicatePrivateMessageAcknowledgedWithoutRedelivery(t *testing.T) {
 			"from_user_id", "to_id", "to_type", "content_type", "content",
 		}).AddRow(uint(7), uint(8), ToTypeUser, ContentTypeText, "already persisted"))
 
-	hub := NewHub(db, nil)
+	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 
 	sender := NewClient(nil, 7, "sender", nil)
@@ -218,7 +218,7 @@ func TestDuplicateGroupMessageAcknowledgedWithoutRedelivery(t *testing.T) {
 			"from_user_id", "to_id", "to_type", "content_type", "content",
 		}).AddRow(uint(7), uint(42), ToTypeGroup, ContentTypeText, "already persisted"))
 
-	hub := NewHub(db, nil)
+	hub := NewHub(db)
 	hub.resolveGroupRecipients = func(context.Context, uint) ([]uint, error) {
 		return []uint{7, 8}, nil
 	}
@@ -256,7 +256,7 @@ func TestMessageIDConflictWithDifferentContentIsRejected(t *testing.T) {
 			"from_user_id", "to_id", "to_type", "content_type", "content",
 		}).AddRow(uint(7), uint(8), ToTypeUser, ContentTypeText, "original content"))
 
-	hub := NewHub(db, nil)
+	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 
 	sender := NewClient(nil, 7, "sender", nil)
@@ -291,7 +291,7 @@ func TestMessageIDConflictWithDifferentSenderIsRejected(t *testing.T) {
 			"from_user_id", "to_id", "to_type", "content_type", "content",
 		}).AddRow(uint(9), uint(8), ToTypeUser, ContentTypeText, "same content"))
 
-	hub := NewHub(db, nil)
+	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 
 	sender := NewClient(nil, 7, "sender", nil)
@@ -326,7 +326,7 @@ func TestMessageIDConflictWithDifferentTargetIsRejected(t *testing.T) {
 			"from_user_id", "to_id", "to_type", "content_type", "content",
 		}).AddRow(uint(7), uint(9), ToTypeUser, ContentTypeText, "same content"))
 
-	hub := NewHub(db, nil)
+	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 
 	sender := NewClient(nil, 7, "sender", nil)
@@ -359,7 +359,7 @@ func TestDuplicateMessageLookupFailureDoesNotAcknowledgeOrDeliver(t *testing.T) 
 		WithArgs("duplicate-lookup-failure").
 		WillReturnError(errors.New("database unavailable"))
 
-	hub := NewHub(db, nil)
+	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 
 	sender := NewClient(nil, 7, "sender", nil)
@@ -415,7 +415,7 @@ func newMessagePersistenceTestDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 func newHubWithSuccessfulPersistence(t *testing.T) *Hub {
 	t.Helper()
 	db, _ := newMessagePersistenceTestDB(t)
-	return NewHub(db.Session(&gorm.Session{DryRun: true}), nil)
+	return NewHub(db.Session(&gorm.Session{DryRun: true}))
 }
 
 func assertInternalMessageError(t *testing.T, message *Message, msgID string) {

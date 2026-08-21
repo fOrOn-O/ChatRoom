@@ -173,7 +173,7 @@ func TestConcurrentConnectionChurnKeepsLatestClient(t *testing.T) {
 
 func startHub(t *testing.T) *chatws.Hub {
 	t.Helper()
-	hub := chatws.NewHub(nil, nil)
+	hub := chatws.NewHub(nil)
 	go hub.Run()
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

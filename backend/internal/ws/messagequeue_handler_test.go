@@ -17,7 +17,7 @@ func TestQueuedPrivateMessagePersistsDeliversAndAcknowledges(t *testing.T) {
 		WithArgs("queued-private-success", uint(7), uint(8), ToTypeUser, ContentTypeText, "persisted before delivery").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	hub := NewHub(db, nil)
+	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 	sender, recipient := registerQueuedMessageClients(t, hub, nil)
 	queued := newQueuedChatMessage("queued-private-success", recipient.UserID, messagequeue.ToTypeUser, "persisted before delivery")
@@ -39,7 +39,7 @@ func TestQueuedPrivatePersistenceFailureReturnsErrorWithoutDelivery(t *testing.T
 		WithArgs("queued-private-failure", uint(7), uint(8), ToTypeUser, ContentTypeText, "must stay pending").
 		WillReturnError(errors.New("database unavailable"))
 
-	hub := NewHub(db, nil)
+	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 	sender, recipient := registerQueuedMessageClients(t, hub, nil)
 	queued := newQueuedChatMessage("queued-private-failure", recipient.UserID, messagequeue.ToTypeUser, "must stay pending")
@@ -56,7 +56,7 @@ func TestQueuedPrivatePersistenceFailureReturnsErrorWithoutDelivery(t *testing.T
 
 func TestQueuedGroupRecipientFailureReturnsErrorWithoutPersistence(t *testing.T) {
 	db, _ := newMessagePersistenceTestDB(t)
-	hub := NewHub(db, nil)
+	hub := NewHub(db)
 	hub.authorizeGroupMessage = func(context.Context, uint, uint) error {
 		return nil
 	}
@@ -79,7 +79,7 @@ func TestQueuedGroupRecipientFailureReturnsErrorWithoutPersistence(t *testing.T)
 
 func TestQueuedGroupMessageRejectsInactiveSenderBeforeProcessing(t *testing.T) {
 	db, _ := newMessagePersistenceTestDB(t)
-	hub := NewHub(db, nil)
+	hub := NewHub(db)
 	authorizationCalls := 0
 	hub.authorizeGroupMessage = func(_ context.Context, userID uint, groupID uint) error {
 		authorizationCalls++
@@ -122,7 +122,7 @@ func TestQueuedPrivateDuplicateAcknowledgesWithoutRedelivery(t *testing.T) {
 			"from_user_id", "to_id", "to_type", "content_type", "content",
 		}).AddRow(uint(7), uint(8), ToTypeUser, ContentTypeText, "deliver only once"))
 
-	hub := NewHub(db, nil)
+	hub := NewHub(db)
 	startGroupRecipientHub(t, hub)
 	sender, recipient := registerQueuedMessageClients(t, hub, nil)
 	queued := newQueuedChatMessage("queued-private-duplicate", recipient.UserID, messagequeue.ToTypeUser, "deliver only once")
@@ -148,7 +148,7 @@ func TestQueuedGroupMessageResolvesRecipientsPersistsAndDelivers(t *testing.T) {
 		WithArgs("queued-group-success", uint(7), uint(42), ToTypeGroup, ContentTypeText, "current members only").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	hub := NewHub(db, nil)
+	hub := NewHub(db)
 	authorizationCalls := 0
 	hub.authorizeGroupMessage = func(_ context.Context, userID uint, groupID uint) error {
 		authorizationCalls++

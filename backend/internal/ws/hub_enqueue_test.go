@@ -10,7 +10,7 @@ import (
 )
 
 func TestSendPrivateReturnsErrorWhenQueueIsFull(t *testing.T) {
-	hub := chatws.NewHub(nil, nil)
+	hub := chatws.NewHub(nil)
 	message := &chatws.Message{
 		MsgID:  "private-queue-full",
 		Type:   chatws.MsgTypeChat,
@@ -33,7 +33,7 @@ func TestSendPrivateReturnsErrorWhenQueueIsFull(t *testing.T) {
 }
 
 func TestSendGroupReturnsErrorWhenQueueIsFull(t *testing.T) {
-	hub := chatws.NewHub(nil, nil)
+	hub := chatws.NewHub(nil)
 	message := &chatws.Message{
 		MsgID:  "group-queue-full",
 		Type:   chatws.MsgTypeChat,
@@ -56,7 +56,7 @@ func TestSendGroupReturnsErrorWhenQueueIsFull(t *testing.T) {
 }
 
 func TestBroadcastReturnsErrorWhenQueueIsFull(t *testing.T) {
-	hub := chatws.NewHub(nil, nil)
+	hub := chatws.NewHub(nil)
 	message := &chatws.Message{Type: chatws.MsgTypeOnlineStatus}
 
 	for attempt := 0; attempt < 10_000; attempt++ {
@@ -73,7 +73,7 @@ func TestBroadcastReturnsErrorWhenQueueIsFull(t *testing.T) {
 }
 
 func TestMessageEntryPointsReturnClosedAfterShutdown(t *testing.T) {
-	hub := chatws.NewHub(nil, nil)
+	hub := chatws.NewHub(nil)
 	go hub.Run()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

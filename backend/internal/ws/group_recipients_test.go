@@ -81,7 +81,7 @@ func TestGroupRecipientLookupFailureDoesNotDeliverMessage(t *testing.T) {
 		memberID = uint(10)
 	)
 
-	hub := NewHub(nil, nil)
+	hub := NewHub(nil)
 	hub.resolveGroupRecipients = func(context.Context, uint) ([]uint, error) {
 		return nil, errGroupRecipientResolutionUnavailable
 	}
