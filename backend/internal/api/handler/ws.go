@@ -6,6 +6,7 @@ import (
 
 	"ChatRoom/internal/api/middleware"
 	"ChatRoom/internal/messagequeue"
+	"ChatRoom/internal/ratelimit"
 	"ChatRoom/internal/ws"
 
 	"github.com/gin-gonic/gin"
@@ -22,7 +23,7 @@ var upgrader = websocket.Upgrader{
 }
 
 // HandleWebSocket 处理 WebSocket 连接
-func HandleWebSocket(c *gin.Context, hub *ws.Hub, publisher messagequeue.Publisher) {
+func HandleWebSocket(c *gin.Context, hub *ws.Hub, publisher messagequeue.Publisher, messageLimiter ratelimit.MessageLimiter) {
 	// 从中间件获取用户信息
 	userID := middleware.GetUserID(c)
 	username := middleware.GetUsername(c)
@@ -54,5 +55,5 @@ func HandleWebSocket(c *gin.Context, hub *ws.Hub, publisher messagequeue.Publish
 
 	// 启动读写 Goroutine
 	go client.WritePump()
-	go client.ReadPump(hub, publisher)
+	go client.ReadPump(hub, publisher, messageLimiter)
 }

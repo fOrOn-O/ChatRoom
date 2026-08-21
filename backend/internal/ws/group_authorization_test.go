@@ -38,7 +38,7 @@ func TestNonMemberCannotSendGroupMessage(t *testing.T) {
 		t.Fatalf("register client: %v", err)
 	}
 	go client.WritePump()
-	go client.ReadPump(hub, &recordingMessagePublisher{err: errors.New("不应发布无权群消息")})
+	go client.ReadPump(hub, &recordingMessagePublisher{err: errors.New("不应发布无权群消息")}, nil)
 
 	const msgID = "59ffb838-6a50-4d9c-94e7-12cdd75269a1"
 	err := peer.WriteJSON(map[string]any{
@@ -119,7 +119,7 @@ func TestAuthorizedMemberCanSendGroupMessage(t *testing.T) {
 		t.Fatalf("register client: %v", err)
 	}
 	go client.WritePump()
-	go client.ReadPump(hub, handlingMessagePublisher{handler: hub})
+	go client.ReadPump(hub, handlingMessagePublisher{handler: hub}, nil)
 
 	const msgID = "6d11c235-5594-4a0f-aac7-952df0ec31f8"
 	if err := peer.WriteJSON(map[string]any{

@@ -15,7 +15,7 @@ func TestPrivateMessagePublishesWithoutAcknowledgingEarly(t *testing.T) {
 	peer, server := websocketPairForAuthorization(t)
 	client := NewClient(server, 7, "alice")
 	go client.WritePump()
-	go client.ReadPump(hub, publisher)
+	go client.ReadPump(hub, publisher, nil)
 
 	const msgID = "private-publish-success"
 	if err := peer.WriteJSON(map[string]any{

@@ -15,23 +15,32 @@ import (
 
 // Router 路由管理器
 type Router struct {
-	engine       *gin.Engine
-	hub          *ws.Hub
-	db           *gorm.DB
-	publisher    messagequeue.Publisher
-	loginLimiter ratelimit.LoginLimiter
-	secret       string
+	engine         *gin.Engine
+	hub            *ws.Hub
+	db             *gorm.DB
+	publisher      messagequeue.Publisher
+	loginLimiter   ratelimit.LoginLimiter
+	messageLimiter ratelimit.MessageLimiter
+	secret         string
 }
 
 // NewRouter 创建新的路由
-func NewRouter(hub *ws.Hub, db *gorm.DB, publisher messagequeue.Publisher, loginLimiter ratelimit.LoginLimiter, jwtSecret string) *gin.Engine {
+func NewRouter(
+	hub *ws.Hub,
+	db *gorm.DB,
+	publisher messagequeue.Publisher,
+	loginLimiter ratelimit.LoginLimiter,
+	messageLimiter ratelimit.MessageLimiter,
+	jwtSecret string,
+) *gin.Engine {
 	r := &Router{
-		engine:       gin.Default(),
-		hub:          hub,
-		db:           db,
-		publisher:    publisher,
-		loginLimiter: loginLimiter,
-		secret:       jwtSecret,
+		engine:         gin.Default(),
+		hub:            hub,
+		db:             db,
+		publisher:      publisher,
+		loginLimiter:   loginLimiter,
+		messageLimiter: messageLimiter,
+		secret:         jwtSecret,
 	}
 
 	r.setupMiddleware()
@@ -127,7 +136,7 @@ func (r *Router) setupRoutes() {
 
 	// WebSocket（需要登录）
 	r.engine.GET("/ws", middleware.Auth(r.secret), func(c *gin.Context) {
-		handler.HandleWebSocket(c, r.hub, r.publisher)
+		handler.HandleWebSocket(c, r.hub, r.publisher, r.messageLimiter)
 	})
 
 	// 静态文件（前端）

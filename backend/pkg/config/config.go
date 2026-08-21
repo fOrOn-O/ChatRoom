@@ -63,7 +63,8 @@ type RedisStreamConfig struct {
 
 // RedisRateLimitConfig Redis 限流配置
 type RedisRateLimitConfig struct {
-	Login LoginRateLimitConfig `mapstructure:"login"`
+	Login   LoginRateLimitConfig   `mapstructure:"login"`
+	Message MessageRateLimitConfig `mapstructure:"message"`
 }
 
 // LoginRateLimitConfig 登录限流配置
@@ -71,6 +72,12 @@ type LoginRateLimitConfig struct {
 	IPLimit        int64         `mapstructure:"ip_limit"`
 	AccountIPLimit int64         `mapstructure:"account_ip_limit"`
 	Window         time.Duration `mapstructure:"window"`
+}
+
+// MessageRateLimitConfig 消息发送限流配置
+type MessageRateLimitConfig struct {
+	Limit  int64         `mapstructure:"limit"`
+	Window time.Duration `mapstructure:"window"`
 }
 
 // JWTConfig JWT 配置
@@ -175,6 +182,12 @@ func setDefaults(config *Config) {
 	}
 	if config.Redis.RateLimit.Login.Window <= 0 {
 		config.Redis.RateLimit.Login.Window = time.Minute
+	}
+	if config.Redis.RateLimit.Message.Limit <= 0 {
+		config.Redis.RateLimit.Message.Limit = 20
+	}
+	if config.Redis.RateLimit.Message.Window <= 0 {
+		config.Redis.RateLimit.Message.Window = 10 * time.Second
 	}
 	if config.JWT.Expire == 0 {
 		config.JWT.Expire = 24 * time.Hour

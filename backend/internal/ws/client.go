@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"ChatRoom/internal/messagequeue"
+	"ChatRoom/internal/ratelimit"
 
 	"github.com/gorilla/websocket"
 )
@@ -66,7 +67,7 @@ func NewClient(conn *websocket.Conn, userID uint, username string) *Client {
 
 // ReadPump 从 WebSocket 连接读取消息
 // 运行在独立的 Goroutine 中
-func (c *Client) ReadPump(hub *Hub, publisher messagequeue.Publisher) {
+func (c *Client) ReadPump(hub *Hub, publisher messagequeue.Publisher, messageLimiter ratelimit.MessageLimiter) {
 	defer func() {
 		c.Close()
 		hub.Unregister(c)
@@ -100,7 +101,7 @@ func (c *Client) ReadPump(hub *Hub, publisher messagequeue.Publisher) {
 			}
 
 			// 处理接收到的消息
-			c.handleMessage(hub, publisher, message)
+			c.handleMessage(hub, publisher, messageLimiter, message)
 		}
 	}
 }
@@ -152,7 +153,7 @@ func (c *Client) WritePump() {
 }
 
 // handleMessage 处理接收到的消息
-func (c *Client) handleMessage(hub *Hub, publisher messagequeue.Publisher, data []byte) {
+func (c *Client) handleMessage(hub *Hub, publisher messagequeue.Publisher, messageLimiter ratelimit.MessageLimiter, data []byte) {
 	var msg struct {
 		Type string          `json:"type"`
 		Data json.RawMessage `json:"data"`
@@ -165,14 +166,14 @@ func (c *Client) handleMessage(hub *Hub, publisher messagequeue.Publisher, data 
 
 	switch msg.Type {
 	case "chat":
-		c.handleChatMessage(hub, publisher, msg.Data)
+		c.handleChatMessage(hub, publisher, messageLimiter, msg.Data)
 	default:
 		log.Printf("未知消息类型: %s", msg.Type)
 	}
 }
 
 // handleChatMessage 处理聊天消息
-func (c *Client) handleChatMessage(hub *Hub, publisher messagequeue.Publisher, data json.RawMessage) {
+func (c *Client) handleChatMessage(hub *Hub, publisher messagequeue.Publisher, messageLimiter ratelimit.MessageLimiter, data json.RawMessage) {
 	var chatMsg struct {
 		MsgID       string `json:"msg_id"`
 		ToID        uint   `json:"to_id"`
@@ -198,6 +199,17 @@ func (c *Client) handleChatMessage(hub *Hub, publisher messagequeue.Publisher, d
 		Timestamp:   time.Now().Unix(),
 	}
 
+	if messageLimiter != nil {
+		allowed, err := messageLimiter.Allow(c.ctx, c.UserID)
+		if err != nil {
+			// 限流依赖异常时放行，后续发布失败仍由原有反馈机制处理。
+			log.Printf("消息限流检查失败，已放行本次消息: user_id=%d err=%v", c.UserID, err)
+		} else if !allowed {
+			c.TrySend(newMessageRateLimitErrorMessage(queued.MsgID))
+			return
+		}
+	}
+
 	if chatMsg.ToType == ToTypeGroup {
 		if err := hub.authorizeGroupMessage(c.ctx, c.UserID, chatMsg.ToID); err != nil {
 			log.Printf("群消息权限校验失败: user_id=%d group_id=%d err=%v", c.UserID, chatMsg.ToID, err)
@@ -213,6 +225,19 @@ func (c *Client) handleChatMessage(hub *Hub, publisher messagequeue.Publisher, d
 	if err := publisher.Publish(c.ctx, queued); err != nil {
 		log.Printf("聊天消息发布失败: msg_id=%s err=%v", queued.MsgID, err)
 		c.TrySend(newMessagePublishErrorMessage(queued.MsgID))
+	}
+}
+
+const errorCodeRateLimited = 2004
+
+func newMessageRateLimitErrorMessage(msgID string) *Message {
+	return &Message{
+		Type: MsgTypeError,
+		Data: map[string]interface{}{
+			"code":    errorCodeRateLimited,
+			"message": "消息发送过于频繁，请稍后重试",
+			"msg_id":  msgID,
+		},
 	}
 }
 

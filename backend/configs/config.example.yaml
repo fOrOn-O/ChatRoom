@@ -30,6 +30,9 @@ redis:
       ip_limit: 30
       account_ip_limit: 5
       window: 1m
+    message:
+      limit: 20
+      window: 10s
   # Streams 发布器和消费者随服务启动，WebSocket chat 消息经 Stream 持久化和投递。
   stream:
     # 留空时会根据 key_prefix 生成；只有需要兼容既有键名时才显式填写。

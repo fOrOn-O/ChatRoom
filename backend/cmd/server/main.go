@@ -69,9 +69,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("初始化登录限流器失败: %v", err)
 	}
+	messageLimiter, err := ratelimit.NewMessageLimiter(rdb, ratelimit.MessageOptions{
+		KeyPrefix: cfg.Redis.KeyPrefix,
+		Limit:     cfg.Redis.RateLimit.Message.Limit,
+		Window:    cfg.Redis.RateLimit.Message.Window,
+	})
+	if err != nil {
+		log.Fatalf("初始化消息限流器失败: %v", err)
+	}
 
 	// 6. 初始化路由
-	router := api.NewRouter(hub, db, queueRuntime.Publisher(), loginLimiter, cfg.JWT.Secret)
+	router := api.NewRouter(hub, db, queueRuntime.Publisher(), loginLimiter, messageLimiter, cfg.JWT.Secret)
 
 	// 7. 创建 HTTP Server
 	server := &http.Server{

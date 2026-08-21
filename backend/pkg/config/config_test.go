@@ -64,6 +64,12 @@ func TestLoadAppliesRedisOperationalDefaults(t *testing.T) {
 	if cfg.Redis.RateLimit.Login.Window != time.Minute {
 		t.Fatalf("登录限流窗口 = %v，期望 %v", cfg.Redis.RateLimit.Login.Window, time.Minute)
 	}
+	if cfg.Redis.RateLimit.Message.Limit != 20 {
+		t.Fatalf("消息发送限制 = %d，期望 %d", cfg.Redis.RateLimit.Message.Limit, 20)
+	}
+	if cfg.Redis.RateLimit.Message.Window != 10*time.Second {
+		t.Fatalf("消息限流窗口 = %v，期望 %v", cfg.Redis.RateLimit.Message.Window, 10*time.Second)
+	}
 }
 
 func TestLoadReplacesInvalidRedisOperationalValues(t *testing.T) {
@@ -85,6 +91,9 @@ func TestLoadReplacesInvalidRedisOperationalValues(t *testing.T) {
     login:
       ip_limit: -1
       account_ip_limit: -1
+      window: -1s
+    message:
+      limit: -1
       window: -1s
 `)
 	if err := os.WriteFile(path, content, 0o600); err != nil {
@@ -112,6 +121,10 @@ func TestLoadReplacesInvalidRedisOperationalValues(t *testing.T) {
 	if loginLimit.IPLimit != 30 || loginLimit.AccountIPLimit != 5 || loginLimit.Window != time.Minute {
 		t.Fatalf("非法登录限流参数未回落到默认值: %+v", loginLimit)
 	}
+	messageLimit := cfg.Redis.RateLimit.Message
+	if messageLimit.Limit != 20 || messageLimit.Window != 10*time.Second {
+		t.Fatalf("非法消息限流参数未回落到默认值: %+v", messageLimit)
+	}
 }
 
 func TestLoadPreservesExplicitRedisOperationalValues(t *testing.T) {
@@ -137,6 +150,9 @@ func TestLoadPreservesExplicitRedisOperationalValues(t *testing.T) {
       ip_limit: 60
       account_ip_limit: 8
       window: 2m
+    message:
+      limit: 50
+      window: 15s
 `)
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatalf("写入测试配置失败: %v", err)
@@ -157,5 +173,9 @@ func TestLoadPreservesExplicitRedisOperationalValues(t *testing.T) {
 	loginLimit := cfg.Redis.RateLimit.Login
 	if loginLimit.IPLimit != 60 || loginLimit.AccountIPLimit != 8 || loginLimit.Window != 2*time.Minute {
 		t.Fatalf("显式登录限流配置被意外覆盖: %+v", loginLimit)
+	}
+	messageLimit := cfg.Redis.RateLimit.Message
+	if messageLimit.Limit != 50 || messageLimit.Window != 15*time.Second {
+		t.Fatalf("显式消息限流配置被意外覆盖: %+v", messageLimit)
 	}
 }
